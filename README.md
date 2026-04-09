@@ -16,16 +16,17 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Add your OpenAI API key to a `.env` file in the project root:
+Add your OpenAI API key to a `.env` file in the root (for other models, set the required credentials as needed; more on model configuration below):
 
 ```
 OPENAI_API_KEY=your-key-here
+...
 ```
 
 Then run your agent in interactive CLI mode:
 
 ```bash
-# to rerun in a different terminal session, run `source .venv/bin/activate` first to activate the virtual environment
+# to rerun in future terminal sessions, run `source .venv/bin/activate` first to activate the virtual environment
 python -m cli
 ```
 
@@ -36,6 +37,45 @@ Commands that fall outside the built-in allowlist will pause and ask for your ap
 To customize the agent's personality or behavior, ask your agent to edit their `soul.md` file accordingly. Changes take effect on the next turn.
 
 The agent also maintains a `memory.md` file in its workspace. It writes to this file to persist information across conversations — it's injected as context every turn, so anything stored there is always available to the agent.
+
+## Configuration
+
+Edit `cli/config.py` to customize the agent before running:
+
+**Model** — set `MODEL` to any supported model:
+```python
+# OpenAI
+MODEL = gpt_5_mini   # default
+MODEL = gpt_5
+MODEL = gpt_4o
+
+# Anthropic
+MODEL = claude_sonnet_4_6
+MODEL = claude_opus_4_6
+
+# Groq (open-source)
+MODEL = oss_120b
+```
+
+Add the corresponding API key to your `.env` file:
+```
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+GROQ_API_KEY=...
+```
+
+**Name & personality** — set `AGENT_NAME` and `BASE_PROMPT`:
+```python
+AGENT_NAME = "Sosa"
+BASE_PROMPT = "You are a general-purpose assistant. Help the user with whatever they need."
+```
+
+**Workspace** — set `WORKSPACE` to the directory where the agent stores its soul, memory, and any files it creates:
+```python
+WORKSPACE = Path("./workspace").resolve()
+```
+
+**MCP servers** — add entries to `MCP_SERVERS` (see [MCP Servers](#mcp-servers) below).
 
 ## Developer Usage
 
