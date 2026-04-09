@@ -1,0 +1,9 @@
+langchain-core
+langchain-community
+langchain-groq
+langchain-openai
+langchain-anthropic
+langchain-mcp-adapters
+langgraph
+rich
+python-dotenv
