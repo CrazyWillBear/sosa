@@ -1,5 +1,7 @@
 .env
 .claude/
+.idea/
 .jbeval/
 .venv/
 workspace/
+__pycache__/
