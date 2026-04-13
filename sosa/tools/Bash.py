@@ -15,7 +15,7 @@ _ALLOWED = {
     "ls", "find", "stat", "file",
     "grep", "rg", "awk", "sed", "cut", "sort", "uniq", "tr", "wc", "diff", "jq", "yq",
     "echo", "pwd", "which", "whereis", "type", "true", "false",
-    "whoami", "id", "uname", "date", "uptime", "hostname", "env", "printenv", "ps", "pgrep",
+    "whoami", "id", "uname", "date", "uptime", "hostname", "ps", "pgrep",
     "python", "python3", "node",
     "pytest", "cargo", "go",
 }

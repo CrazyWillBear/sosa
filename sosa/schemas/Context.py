@@ -28,7 +28,7 @@ class Context:
         messages = [
             SystemMessage(content=self.system_prompt),
             SystemMessage(content=(
-                f"Soul.md:\n```\n{self.soul}\n```\n"
+                f"soul.md:\n```\n{self.soul}\n```\n"
             )),
             SystemMessage(content=(
                 f"memory.md:\n```\n{self.memory_md}\n```\n"

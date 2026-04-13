@@ -4,12 +4,15 @@ from langchain_core.tools import tool
 
 
 @tool
-def write_file(file_path: str, content: str) -> str:
-    """Writes content to a file at the specified path. Overwrites the file if it already exists. Use absolute paths. ALWAYS READ A FILE BEFORE EDITING IT!!!"""
+def write_file(file_path: str, content: str, mode: str = "a") -> str:
+    """Writes content to a file at the specified path. Use absolute paths. ALWAYS READ A FILE BEFORE EDITING IT!!!
+    mode: 'a' (default) appends to the file; 'w' overwrites the file entirely."""
     if content == "<This content has been removed. Reread the file to see what you wrote.>":
         return "Error: content was stripped from history. Read the file first, then rewrite it with the full content."
+    if mode not in ("a", "w"):
+        return "Error: mode must be 'a' (append) or 'w' (overwrite)."
     try:
-        with open(file_path, 'w') as f:
+        with open(file_path, mode) as f:
             f.write(content)
         return f"Successfully wrote to {file_path}"
     except Exception as e:
@@ -33,20 +36,16 @@ def edit_file(file_path: str, string_to_replace: str, replacement: str) -> str:
     except Exception as e:
         return f"Error editing file: {str(e)}"
 
-_TOKEN_LIMIT = 5000  # ~4 chars per token
-_CHAR_LIMIT = _TOKEN_LIMIT * 4
-
 @tool
-def read_file(file_path: str) -> str:
-    """Reads the content of a file at the specified path. Files over ~5000 tokens will be truncated. USE ABSOLUTE PATHS."""
+def read_file(file_path: str, start_line: int = 0, end_line: int = 200) -> str:
+    """Reads the content of a file at the specified path. USE ABSOLUTE PATHS.
+    start_line and end_line are 0-indexed line numbers (like Python list slicing).
+    Defaults to the first 200 lines. For large files, paginate by adjusting these values."""
     if Path(file_path).name == "memory.md":
         return "memory.md is already in your context as a system message. No need to read it."
     try:
         with open(file_path, 'r') as f:
-            content = f.read()
-        if len(content) > _CHAR_LIMIT:
-            content = content[:_CHAR_LIMIT]
-            return content + f"\n\n[File truncated at ~5000 tokens. Use bash to read specific lines, e.g. sed -n '1,100p' {file_path}] or head or tail to read the beginning or end of the file.]"
-        return content
+            lines = f.readlines()
+        return ''.join(lines[start_line:end_line])
     except Exception as e:
         return f"Error reading file: {str(e)}"

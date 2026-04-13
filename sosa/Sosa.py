@@ -40,7 +40,7 @@ class Sosa:
         workspace_path: Path | str,
         tools: list[Tool | BaseTool] = None,
         name: str = "Sosa",
-        approval_fn: callable = None,
+        approval_fn: callable | None = None,
         mcp_servers: dict | None = None,
     ):
         self._base_model = model

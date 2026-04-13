@@ -12,57 +12,55 @@ These run without user confirmation.
 ### File Reading
 | Program | Notes |
 |---------|-------|
-| `cat` | |
-| `head` | |
-| `tail` | |
-| `less` | |
-| `more` | |
+| `cat` | print file contents |
+| `head` | first N lines of a file |
+| `tail` | last N lines of a file |
+| `less` | pager |
+| `more` | pager |
 
 ### Filesystem Navigation
 | Program | Notes |
 |---------|-------|
-| `ls` | |
-| `find` | |
-| `stat` | |
-| `file` | |
+| `ls` | list directory contents |
+| `find` | search for files |
+| `stat` | file/filesystem status |
+| `file` | determine file type |
 
 ### Text Processing
 | Program | Notes |
 |---------|-------|
-| `grep` | |
+| `grep` | search with regex |
 | `rg` | ripgrep |
-| `awk` | |
-| `sed` | |
-| `cut` | |
-| `sort` | |
-| `uniq` | |
-| `tr` | |
-| `wc` | |
-| `diff` | |
-| `jq` | |
-| `yq` | |
+| `awk` | text processing language |
+| `sed` | stream editor |
+| `cut` | extract columns/fields |
+| `sort` | sort lines |
+| `uniq` | filter duplicate lines |
+| `tr` | translate or delete characters |
+| `wc` | word/line/character count |
+| `diff` | compare files line by line |
+| `jq` | JSON processor |
+| `yq` | YAML processor |
 
 ### Shell Utilities
 | Program | Notes |
 |---------|-------|
-| `echo` | |
-| `pwd` | |
-| `which` | |
-| `whereis` | |
-| `type` | |
-| `true` | |
-| `false` | |
+| `echo` | print text |
+| `pwd` | print working directory |
+| `which` | locate a command |
+| `whereis` | locate binary, source, and manual |
+| `type` | describe a command |
+| `true` | return success |
+| `false` | return failure |
 
 ### System Info
 | Program | Notes |
 |---------|-------|
-| `whoami` | |
-| `id` | |
-| `uname` | |
-| `date` | |
-| `uptime` | |
-| `hostname` | |
-| `env` | |
-| `printenv` | |
-| `ps` | |
-| `pgrep` | |
+| `whoami` | print current username |
+| `id` | print user and group IDs |
+| `uname` | print system information |
+| `date` | print date and time |
+| `uptime` | how long the system has been running |
+| `hostname` | print system hostname |
+| `ps` | report process status |
+| `pgrep` | find processes by name |
