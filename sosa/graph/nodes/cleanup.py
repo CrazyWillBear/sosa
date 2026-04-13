@@ -3,9 +3,9 @@ from langchain_core.messages import ToolMessage, AIMessage, RemoveMessage
 from sosa.schemas.AgentState import AgentState
 
 _READ_PLACEHOLDER = "<cleaned, read file again to see contents>"
-_BASH_PLACEHOLDER = "<truncated to 250 tokens>"
+_BASH_PLACEHOLDER = "<truncated to ~500 tokens>"
 _WRITE_PLACEHOLDER = "<This content has been removed. Reread the file to see what you wrote.>"
-_BASH_CHAR_LIMIT = 250 * 4
+_BASH_CHAR_LIMIT = 500 * 4
 
 
 def cleanup(state: AgentState):

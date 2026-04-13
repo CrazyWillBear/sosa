@@ -169,3 +169,10 @@ MCP requires the agent to be used as an async context manager:
 async with build_agent() as agent:
     await session.run(agent)
 ```
+
+## TODO
+
+- **Universal persistent memory** — memory shared across all workspaces, not just per-workspace
+- **Per-workspace memory** — improvements to existing per-workspace `memory.md` system
+- **Agentic context management** — let the agent control its own context window strategy
+- **`cleanup.py` stale message window** — consider cleaning up `read_file` results older than ~10 messages ago rather than immediately after each turn
