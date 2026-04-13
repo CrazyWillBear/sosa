@@ -28,9 +28,9 @@ START → init → cleanup → react → tool_node → (react | END)
 
 `sosa/schemas/Context.py` assembles what the model sees each turn: the system prompt (from `sosa/prompts/Prompt.md` template filled with name/prompt/workspace), `soul.md`, `memory.md`, and the message history. If MCP tools are loaded, a `McpAddendum.md` system message is appended.
 
-### Required Tools
+### Basic Tools
 
-Every agent gets: `run_bash_command`, `end_turn`, `write_file`, `edit_file`, `read_file`. Additional tools can be passed to `Sosa(tools=[...])`.
+By default, every agent includes: `run_bash_command`, `write_file`, `edit_file`, `read_file`. Additional tools can be passed to `Sosa(tools=[...])`. Pass `include_basic_tools=False` to opt out of these defaults entirely.
 
 ### Bash Command Policy
 

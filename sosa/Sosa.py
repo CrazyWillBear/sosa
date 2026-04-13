@@ -17,13 +17,13 @@ from sosa.tools.Bash import run_bash_command
 from sosa.tools.FileOps import write_file, edit_file, read_file
 
 _PROMPT_TEMPLATE = (Path(__file__).parent / "prompts" / "Prompt.md").read_text()
-REQUIRED_TOOLS = [run_bash_command, write_file, edit_file, read_file]
+BASIC_TOOLS = [run_bash_command, write_file, edit_file, read_file]
 
 
-def _add_required_tools(tools: List[Tool | BaseTool] = None) -> List[Tool | BaseTool]:
+def _add_basic_tools(tools: List[Tool | BaseTool] = None) -> List[Tool | BaseTool]:
     if tools is None:
-        return list(REQUIRED_TOOLS)
-    for tool in REQUIRED_TOOLS:
+        return list(BASIC_TOOLS)
+    for tool in BASIC_TOOLS:
         if tool not in tools:
             tools.append(tool)
     return tools
@@ -39,12 +39,13 @@ class Sosa:
         prompt: str,
         workspace_path: Path | str,
         tools: list[Tool | BaseTool] = None,
+        include_basic_tools: bool = True,
         name: str = "Sosa",
         approval_fn: callable | None = None,
         mcp_servers: dict | None = None,
     ):
         self._base_model = model
-        self.tools = _add_required_tools(tools)
+        self.tools = _add_basic_tools(tools) if include_basic_tools else (tools or [])
         self.model = model.bind_tools(self.tools)
         self.workspace_path = Path(workspace_path).resolve()
         self.name = name

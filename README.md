@@ -98,7 +98,7 @@ async for msg in agent.run(messages):
 
 ## Bash Command Approval
 
-By default, the agent can only run commands from a pre-approved allowlist (see [COMMAND_POLICY.md](COMMAND_POLICY.md)). Any command containing a program not on that list is **denied automatically** unless you pass an `approval_fn`.
+By default, the agent can only run commands from a pre-approved allowlist (see [COMMAND_POLICY.md](sosa/tools/BASH_COMMAND_POLICY.md)). Any command containing a program not on that list is **denied automatically** unless you pass an `approval_fn`.
 
 `approval_fn` is a function that receives the command string and returns `True` (allow) or `False` (deny). Without it, unapproved commands are always blocked.
 
