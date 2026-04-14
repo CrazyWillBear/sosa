@@ -43,7 +43,7 @@ def run_bash_command(
 
     if not all(p in _ALLOWED for p in _programs(command)):
         if not approval_fn(command):
-            return "Command not approved by user."
+            return f"Command not approved by user: {command}"
 
     try:
         result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=workspace_path)
@@ -52,4 +52,11 @@ def run_bash_command(
             output = output[:_CHAR_LIMIT] + "\n\n[Output truncated at ~5000 tokens]"
         return output
     except subprocess.CalledProcessError as e:
-        return f"Error executing command: {e.stderr.decode('utf-8')}"
+        stderr = e.stderr.decode('utf-8').strip()
+        stdout = e.stdout.decode('utf-8').strip()
+        msg = f"Command failed (exit code {e.returncode}): {command}"
+        if stdout:
+            msg += f"\nstdout: {stdout}"
+        if stderr:
+            msg += f"\nstderr: {stderr}"
+        return msg

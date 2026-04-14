@@ -15,7 +15,8 @@ class AgentState(TypedDict):
     system_prompt: str                                  # System prompt, includes user prompt
     soul: str                                           # Soul.md
     messages: Annotated[List[AnyMessage], add_messages] # Includes tool calls and responses
-    workspace_path: Path                                # Path to agent workspace
+    workspace_path: Path                                # Path to agent workspace (per-workspace files/memory)
+    soul_memory_path: Path                              # Path to soul.md and universal memory.md
 
     # State
     name: str

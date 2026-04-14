@@ -30,12 +30,15 @@ def agent_response(agent_name: str, content: str) -> None:
     ))
 
 
-_NO_ARGS_TOOLS = {"write_file", "edit_file"}
+_SHOW_ONLY_PATH = {"write_file", "edit_file"}
 
 
 def tool_call(name: str, args: dict) -> None:
     arg_parts = []
-    if name not in _NO_ARGS_TOOLS:
+    if name in _SHOW_ONLY_PATH:
+        if "file_path" in args:
+            arg_parts.append(f"[dim]file_path[/dim][dim white]=[/dim white][italic]{args['file_path']}[/italic]")
+    else:
         for k, v in args.items():
             v_str = str(v)
             if len(v_str) > 60:
@@ -68,11 +71,11 @@ def tool_result(content: str) -> None:
     ))
 
 
-def approval_prompt(command: str) -> bool:
+def approval_prompt(action: str) -> bool:
     console.print()
     console.print(Panel(
-        f"[bold yellow]$ {command}[/bold yellow]",
-        title="[bold red]Command requires approval[/bold red]",
+        f"[bold yellow]{action}[/bold yellow]",
+        title="[bold red]Requires approval[/bold red]",
         title_align="left",
         border_style="red",
         box=box.ROUNDED,

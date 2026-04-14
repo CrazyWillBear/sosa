@@ -11,14 +11,13 @@ _MCP_ADDENDUM = (Path(__file__).parent.parent / "prompts" / "McpAddendum.md").re
 class Context:
     system_prompt: str
     soul: str
-    memory_md: str
     messages: List[AnyMessage]
     has_mcp: bool
 
     def __init__(self, agent_state: AgentState):
         self.system_prompt = agent_state['system_prompt']
+        self.soul_path = agent_state['soul_memory_path'] / "soul.md"
         self.soul = agent_state['soul']
-        self.memory_md = (agent_state['workspace_path'] / "memory.md").read_text()
         self.messages = agent_state['messages']
         self.has_mcp = any(t.name == "search_tools" for t in agent_state.get('tools', []))
 
@@ -28,10 +27,7 @@ class Context:
         messages = [
             SystemMessage(content=self.system_prompt),
             SystemMessage(content=(
-                f"soul.md:\n```\n{self.soul}\n```\n"
-            )),
-            SystemMessage(content=(
-                f"memory.md:\n```\n{self.memory_md}\n```\n"
+                f"{self.soul_path}:\n```\n{self.soul}\n```\n"
             )),
         ]
 
