@@ -40,6 +40,7 @@ class Sosa:
         prompt: str,
         workspace_path: Path | str,
         soul_memory_path: Path | str,
+        skills_path: Path | str | None = None,
         tools: list[Tool | BaseTool] = None,
         include_basic_tools: bool = True,
         name: str = "Sosa",
@@ -51,6 +52,7 @@ class Sosa:
         self.model = model.bind_tools(self.tools)
         self.workspace_path = Path(workspace_path).resolve()
         self.soul_memory_path = Path(soul_memory_path).resolve()
+        self.skills_path = Path(skills_path).resolve() if skills_path else None
         self.name = name
         self._base_prompt = prompt
         self.system_prompt = self._build_system_prompt(prompt)
@@ -102,6 +104,12 @@ class Sosa:
     # Graph
     # ------------------------------------------------------------------
 
+    def _list_skills(self) -> str:
+        if not self.skills_path or not self.skills_path.exists():
+            return "(none)"
+        dirs = sorted(p for p in self.skills_path.iterdir() if p.is_dir())
+        return "\n".join(str(d) for d in dirs) if dirs else "(none)"
+
     def _build_system_prompt(self, prompt: str) -> str:
         return (
             _PROMPT_TEMPLATE
@@ -109,6 +117,7 @@ class Sosa:
             .replace("<system_prompt>", prompt)
             .replace("<workspace_path>", str(self.workspace_path))
             .replace("<soul_memory_path>", str(self.soul_memory_path))
+            .replace("<skills>", self._list_skills())
         )
 
     def build(self):
@@ -141,6 +150,7 @@ class Sosa:
             "messages": messages,
             "workspace_path": self.workspace_path,
             "soul_memory_path": self.soul_memory_path,
+            "skills_path": self.skills_path,
             "name": self.name,
             "model": self.model,
             "base_model": self._base_model,

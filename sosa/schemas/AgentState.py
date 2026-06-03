@@ -17,6 +17,7 @@ class AgentState(TypedDict):
     messages: Annotated[List[AnyMessage], add_messages] # Includes tool calls and responses
     workspace_path: Path                                # Path to agent workspace (per-workspace files/memory)
     soul_memory_path: Path                              # Path to soul.md and universal memory.md
+    skills_path: Path                                   # Path to skills directory
 
     # State
     name: str

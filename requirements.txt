@@ -7,3 +7,5 @@ langchain-mcp-adapters
 langgraph
 rich
 python-dotenv
+
+langchain-ollama

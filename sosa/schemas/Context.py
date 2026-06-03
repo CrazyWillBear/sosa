@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import List
 
-from langchain_core.messages import AnyMessage, SystemMessage
+from langchain_core.messages import AnyMessage, SystemMessage, AIMessage
 
 from sosa.schemas.AgentState import AgentState
 

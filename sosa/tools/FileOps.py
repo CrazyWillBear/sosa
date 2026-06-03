@@ -103,10 +103,11 @@ def edit_file(
 
 
 @tool
-def read_file(file_path: str, start_line: int = 0, end_line: int = 200) -> str:
+def read_file(file_path: str, start_line: int = 0, end_line: int = 200, preserve: bool = False) -> str:
     """Reads the content of a file at the specified path. USE ABSOLUTE PATHS.
     start_line and end_line are 0-indexed line numbers (like Python list slicing).
-    Defaults to the first 200 lines. For large files, paginate by adjusting these values."""
+    Defaults to the first 200 lines. For large files, paginate by adjusting these values.
+    preserve, if True, will keep this file in your context without ever clearing it. By default it's false. USE THIS ONLY FOR FILES THAT YOU WILL NEED PERMANENTLY, suck as skill files, memory / note files, etc."""
     try:
         with open(file_path, 'r') as f:
             lines = f.readlines()

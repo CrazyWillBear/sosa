@@ -46,11 +46,13 @@ def run_bash_command(
             return f"Command not approved by user: {command}"
 
     try:
-        result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=workspace_path)
+        result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=workspace_path, timeout=120)
         output = result.stdout.decode('utf-8')
         if len(output) > _CHAR_LIMIT:
             output = output[:_CHAR_LIMIT] + "\n\n[Output truncated at ~5000 tokens]"
         return output
+    except subprocess.TimeoutExpired:
+        return f"Command timed out after 120 seconds: {command}"
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode('utf-8').strip()
         stdout = e.stdout.decode('utf-8').strip()
