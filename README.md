@@ -1,8 +1,8 @@
 # Sosa
 
 A LangGraph-based AI agent framework with a focus on safety, modularity, and ease of use. Sosa agents have a 
-configurable workspace, per-workspace memory, external tools (including custom MCP servers), a built-in Bash 
-terminal, and a persistent personality defined in `<workspace_dir>/soul.md`.
+configurable workspace, universal + per-workspace memory, external tools (including custom MCP servers), a built-in Bash 
+terminal, and a persistent personality.
 
 ## CLI Usage
 
@@ -47,11 +47,14 @@ Edit `cli/config.py` to customize the agent before running:
 # OpenAI
 MODEL = gpt_5_mini   # default
 MODEL = gpt_5
+MODEL = gpt_5_4
 MODEL = gpt_4o
 
 # Anthropic
-MODEL = claude_sonnet_4_6
 MODEL = claude_opus_4_6
+MODEL = claude_sonnet_4_6
+MODEL = claude_haiku_4_5
+MODEL = claude_sonnet_3_7
 
 # Groq (open-source)
 MODEL = oss_120b
@@ -70,7 +73,12 @@ AGENT_NAME = "Sosa"
 BASE_PROMPT = "You are a general-purpose assistant. Help the user with whatever they need."
 ```
 
-**Workspace** — set `WORKSPACE` to the directory where the agent stores its soul, memory, and any files it creates:
+**Soul & universal memory** — set `SOUL_MEMORY_DIR` to the directory where the agent stores its soul and universal memory (shared across all workspaces):
+```python
+SOUL_MEMORY_DIR = Path("/home/you/sosa").resolve()
+```
+
+**Workspace** — set `WORKSPACE` to the directory where the agent stores its per-workspace memory and any files it creates:
 ```python
 WORKSPACE = Path("./workspace").resolve()
 ```
@@ -172,7 +180,4 @@ async with build_agent() as agent:
 
 ## TODO
 
-- **Universal persistent memory** — memory shared across all workspaces, not just per-workspace
-- **Per-workspace memory** — improvements to existing per-workspace `memory.md` system
 - **Agentic context management** — let the agent control its own context window strategy
-- **`cleanup.py` stale message window** — consider cleaning up `read_file` results older than ~10 messages ago rather than immediately after each turn
