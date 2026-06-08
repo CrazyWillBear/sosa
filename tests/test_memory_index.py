@@ -904,3 +904,176 @@ class TestInitMalformedFrontmatter:
         if not isinstance(msgs, list):
             msgs = [msgs]
         assert not msgs, "No messages expected when all memory files are well-formed"
+
+
+# ---------------------------------------------------------------------------
+# Issue #22: malformed-file recovery bugs
+# ---------------------------------------------------------------------------
+
+
+class TestMalformedSiblingStillRegistersGoodFileHashes:
+    """AC: good-file hashes are registered in file_hashes even when a malformed sibling is present.
+
+    Regression for #22: previously memory_hash_updates was emptied on the error path,
+    silently dropping all memory-file hashes so the staleness node couldn't surface
+    external edits to the well-formed files.
+    """
+
+    def _make_state(self, soul_path: Path, workspace: Path, file_hashes: dict | None = None) -> dict:
+        state: dict = {"soul_memory_path": soul_path, "workspace_path": workspace}
+        if file_hashes is not None:
+            state["file_hashes"] = file_hashes
+        return state
+
+    def test_good_file_hash_registered_when_malformed_sibling_present(self, tmp_path: Path) -> None:
+        """init registers the well-formed sibling's hash in file_hashes even when another file is malformed."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        good = _write_memory_file(soul_path, "alice", "user", "Alice is the user")
+        # malformed sibling — no frontmatter
+        bad = soul_path / "memory" / "broken.md"
+        bad.write_text("no frontmatter here\n")
+
+        state = self._make_state(soul_path, workspace)
+        result = init(state)
+
+        hashes = result.get("file_hashes", {})
+        assert str(good) in hashes, (
+            f"Well-formed memory file {good} must be in file_hashes even when a "
+            f"malformed sibling is present. Got keys: {list(hashes.keys())}"
+        )
+        assert len(hashes[str(good)]) == 64, "Hash value must be a 64-char hex SHA-256"
+
+    def test_external_edit_to_good_file_surfaced_while_malformed_sibling_persists(self, tmp_path: Path) -> None:
+        """The staleness node surfaces an external edit to the good file even while the malformed sibling persists."""
+        from sosa.graph.nodes.init import init
+        from sosa.graph.nodes.staleness import staleness
+        from sosa.schemas.AgentState import merge_file_hashes
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        good = _write_memory_file(soul_path, "alice", "user", "Alice is the user")
+        bad = soul_path / "memory" / "broken.md"
+        bad.write_text("no frontmatter here\n")
+
+        # Turn 1: init registers good-file hash (malformed sibling is present)
+        state1 = self._make_state(soul_path, workspace)
+        result1 = init(state1)
+        hashes_after_init = result1.get("file_hashes", {})
+        assert str(good) in hashes_after_init, (
+            "Precondition: good file must be in file_hashes after turn 1"
+        )
+
+        # External edit to the good file between turns
+        good.write_text("---\ndescription: Alice updated externally\ntype: user\n---\n")
+
+        # Run staleness with the hashes from turn 1
+        merged = merge_file_hashes({}, hashes_after_init)
+        staleness_state = {"file_hashes": merged, "messages": []}
+        staleness_result = staleness(staleness_state)
+
+        msgs = staleness_result.get("messages", [])
+        assert msgs, (
+            "Staleness node must surface an externally-edited good memory file "
+            "even while a malformed sibling persists"
+        )
+        combined = " ".join(m.content for m in msgs if hasattr(m, "content"))
+        assert str(good) in combined or good.name in combined, (
+            f"Staleness message must name the changed file. Got: {combined}"
+        )
+
+
+class TestMalformedFileNoDuplicateErrorAccumulation:
+    """AC: a persistent, unchanged malformed file does NOT append a new duplicate
+    error SystemMessage to messages on every turn.
+
+    Regression for #22: the error message had no stable id, so add_messages appended
+    a fresh copy each turn instead of deduplicating.
+    """
+
+    def _make_state(self, soul_path: Path, workspace: Path, messages: list | None = None, file_hashes: dict | None = None) -> dict:
+        state: dict = {"soul_memory_path": soul_path, "workspace_path": workspace}
+        if messages is not None:
+            state["messages"] = messages
+        if file_hashes is not None:
+            state["file_hashes"] = file_hashes
+        return state
+
+    def test_error_message_has_stable_id(self, tmp_path: Path) -> None:
+        """The error SystemMessage produced by init must carry a non-None id."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (soul_path / "memory").mkdir()
+        (soul_path / "memory" / "broken.md").write_text("no frontmatter\n")
+
+        state = self._make_state(soul_path, workspace)
+        result = init(state)
+
+        msgs = result.get("messages", [])
+        if not isinstance(msgs, list):
+            msgs = [msgs]
+        sys_msgs = [m for m in msgs if isinstance(m, SystemMessage)]
+        assert sys_msgs, "Expected a SystemMessage for the malformed file"
+        assert sys_msgs[0].id is not None, (
+            "Error SystemMessage must have a non-None id so add_messages can dedup it"
+        )
+
+    def test_same_malformed_file_does_not_accumulate_duplicate_errors(self, tmp_path: Path) -> None:
+        """Calling init twice with an unchanged malformed file must not double the error messages.
+
+        Simulates add_messages reducer: after two turns the history must contain only
+        one copy of the error, not two.
+        """
+        from langchain_core.messages import HumanMessage
+        from langgraph.graph import add_messages
+
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (soul_path / "memory").mkdir()
+        (soul_path / "memory" / "broken.md").write_text("no frontmatter\n")
+
+        # Turn 1: no prior messages, no stored hashes
+        state1 = self._make_state(soul_path, workspace, messages=[HumanMessage(content="hi")])
+        result1 = init(state1)
+
+        # Simulate the LangGraph add_messages reducer merging result1["messages"] into the history
+        history: list = [HumanMessage(content="hi")]
+        if result1.get("messages"):
+            history = add_messages(history, result1["messages"])
+
+        # Turn 2: same malformed file, hashes from turn 1
+        state2 = self._make_state(
+            soul_path, workspace,
+            messages=list(history),
+            file_hashes=result1.get("file_hashes", {}),
+        )
+        result2 = init(state2)
+
+        if result2.get("messages"):
+            history = add_messages(history, result2["messages"])
+
+        # Count error messages in history
+        error_msgs = [
+            m for m in history
+            if isinstance(m, SystemMessage) and "Memory index error" in m.content
+        ]
+        assert len(error_msgs) == 1, (
+            f"Expected exactly 1 error message after two turns with the same malformed file, "
+            f"got {len(error_msgs)}. Messages: {[m.content[:80] for m in error_msgs]}"
+        )

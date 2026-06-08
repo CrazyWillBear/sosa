@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 from langchain_core.messages import SystemMessage
@@ -25,7 +26,7 @@ def _read_project_doc(directory: Path) -> tuple[str | None, Path | None]:
 def _sync_memory_index(
     soul_memory_path: Path,
     stored_hashes: dict[str, str],
-) -> tuple[str | None, dict[str, object]]:
+) -> tuple[str | None, dict[str, object], MalformedMemoryFileError | None]:
     """Hash-gate MEMORY.md regeneration and compute per-file hash updates.
 
     Scans ``soul_memory_path/memory/`` for ``.md`` files and compares each
@@ -33,14 +34,23 @@ def _sync_memory_index(
     ``stored_hashes``.  The index is rebuilt only when the memory set has
     changed (file added, content changed, or file deleted).
 
+    Hash updates are computed before calling ``build_memory_index`` so that
+    well-formed-file hashes are always returned — even when a sibling file is
+    malformed.  This preserves staleness tracking for the good files while the
+    broken file persists.
+
     Returns:
-        (memory_index, hash_updates) where:
+        (memory_index, hash_updates, error) where:
         - *memory_index* is the rebuilt index string (or None when no files
-          exist), reflecting the post-change state.  It is also None when
-          nothing changed and the caller should retain the previous state value.
+          exist), reflecting the post-change state.  It is None when nothing
+          changed (caller retains the previous value) and also None when the
+          index build failed.
         - *hash_updates* is a ``file_hashes``-compatible dict: current-hash
           entries for existing files, ``REMOVE`` sentinels for deleted files.
           Only entries that differ from ``stored_hashes`` are included.
+          Always populated for all memory files — even on the error path.
+        - *error* is the ``MalformedMemoryFileError`` if any file had invalid
+          frontmatter, or None on success.
     """
     memory_dir = soul_memory_path / "memory"
     current_files: dict[str, str] = {}  # str(path) → current hash
@@ -56,7 +66,9 @@ def _sync_memory_index(
         if k.startswith(str(memory_dir) + "/") or k.startswith(str(memory_dir) + "\\")
     }
 
-    # Compute hash updates: new/changed files and deleted files
+    # Compute hash updates: new/changed files and deleted files.
+    # Done BEFORE calling build_memory_index so the updates are available even
+    # if the build raises MalformedMemoryFileError for a broken sibling.
     hash_updates: dict[str, object] = {}
     changed = False
 
@@ -72,11 +84,16 @@ def _sync_memory_index(
 
     if not changed:
         # Nothing changed — leave MEMORY.md as-is, emit only no-op updates
-        return None, hash_updates
+        return None, hash_updates, None
 
-    # Rebuild the index (writes MEMORY.md when files exist)
-    memory_index = build_memory_index(soul_memory_path)
-    return memory_index, hash_updates
+    # Rebuild the index (writes MEMORY.md when files exist).
+    # Catch MalformedMemoryFileError here so hash_updates is still returned.
+    try:
+        memory_index = build_memory_index(soul_memory_path)
+    except MalformedMemoryFileError as exc:
+        return None, hash_updates, exc
+
+    return memory_index, hash_updates, None
 
 
 def init(state: AgentState) -> dict:
@@ -103,18 +120,22 @@ def init(state: AgentState) -> dict:
         soul_path.write_text(_DEFAULT_SOUL)
 
     stored_hashes: dict[str, str] = state.get("file_hashes") or {}
+    new_memory_index, memory_hash_updates, memory_file_error = _sync_memory_index(
+        soul_memory_path, stored_hashes
+    )
+
     memory_index_error: str | None = None
-    try:
-        new_memory_index, memory_hash_updates = _sync_memory_index(
-            soul_memory_path, stored_hashes
-        )
-    except MalformedMemoryFileError as exc:
-        new_memory_index = None
-        memory_hash_updates = {}
+    memory_index_error_id: str | None = None
+    if memory_file_error is not None:
         memory_index_error = (
-            f"[Memory index error] {exc} "
+            f"[Memory index error] {memory_file_error} "
             f"Fix the frontmatter in the file above to restore the memory index."
         )
+        # Stable id derived from the error text so add_messages dedups identical
+        # errors across turns instead of appending a new copy every turn.
+        memory_index_error_id = "memory-index-error-" + hashlib.sha256(
+            memory_index_error.encode()
+        ).hexdigest()[:16]
 
     global_doc_content, global_doc_path = _read_project_doc(soul_memory_path)
     workspace_doc_content, workspace_doc_path = _read_project_doc(state["workspace_path"])
@@ -141,5 +162,7 @@ def init(state: AgentState) -> dict:
     if file_hashes:
         result["file_hashes"] = file_hashes
     if memory_index_error:
-        result["messages"] = [SystemMessage(content=memory_index_error)]
+        result["messages"] = [
+            SystemMessage(content=memory_index_error, id=memory_index_error_id)
+        ]
     return result
