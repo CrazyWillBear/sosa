@@ -1,8 +1,12 @@
 from pathlib import Path
 from typing import Annotated, Callable
 
-from langchain_core.tools import tool
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
+from langgraph.types import Command
+
+from sosa.tools.hashing import hash_file
 
 
 def _line_block_replace(content: str, needle: str, replacement: str) -> tuple[str, str | None]:
@@ -103,7 +107,13 @@ def edit_file(
 
 
 @tool
-def read_file(file_path: str, start_line: int = 0, end_line: int = 200, preserve: bool = False) -> str:
+def read_file(
+    file_path: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    start_line: int = 0,
+    end_line: int = 200,
+    preserve: bool = False,
+) -> Command:
     """Reads the content of a file at the specified path. USE ABSOLUTE PATHS.
     start_line and end_line are 0-indexed line numbers (like Python list slicing).
     Defaults to the first 200 lines. For large files, paginate by adjusting these values.
@@ -111,6 +121,29 @@ def read_file(file_path: str, start_line: int = 0, end_line: int = 200, preserve
     try:
         with open(file_path, 'r') as f:
             lines = f.readlines()
-        return ''.join(lines[start_line:end_line])
+        content = ''.join(lines[start_line:end_line])
     except Exception as e:
-        return f"Error reading '{file_path}': {str(e)}"
+        content = f"Error reading '{file_path}': {str(e)}"
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(content=content, tool_call_id=tool_call_id)
+                ],
+            }
+        )
+
+    # Record a content fingerprint for this file (best-effort; ignore hash errors)
+    new_hash: dict[str, str] = {}
+    try:
+        new_hash[file_path] = hash_file(file_path)
+    except Exception:
+        pass
+
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(content=content, tool_call_id=tool_call_id)
+            ],
+            "file_hashes": new_hash,
+        }
+    )

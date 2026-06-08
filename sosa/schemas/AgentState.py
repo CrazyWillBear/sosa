@@ -8,6 +8,11 @@ from langchain_core.tools import BaseTool, Tool
 from langgraph.graph import add_messages
 
 
+def merge_file_hashes(existing: dict[str, str], update: dict[str, str]) -> dict[str, str]:
+    """Reducer for file_hashes: merges update into existing (update wins on collision)."""
+    return {**existing, **update}
+
+
 class AgentState(TypedDict):
 
 
@@ -25,3 +30,7 @@ class AgentState(TypedDict):
     base_model: BaseChatModel
     tools: List[BaseTool | Tool]
     approval_fn: Callable[[str], bool]
+
+    # Per-session file content fingerprints: path → SHA-256 hex digest.
+    # Populated by read_file; resets each new session.
+    file_hashes: Annotated[dict[str, str], merge_file_hashes]

@@ -156,6 +156,7 @@ class Sosa:
             "base_model": self._base_model,
             "tools": self.tools,
             "approval_fn": self.approval_fn,
+            "file_hashes": {},
         }
 
         async for chunk in self.graph.astream(state, stream_mode="updates"):
