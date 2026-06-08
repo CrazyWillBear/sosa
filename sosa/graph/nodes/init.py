@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from sosa.graph.nodes.memory_index import build_memory_index
 from sosa.graph.nodes.project_docs import resolve_project_doc
 from sosa.schemas.AgentState import AgentState
 from sosa.tools.hashing import hash_file
@@ -20,11 +21,14 @@ def _read_project_doc(directory: Path) -> tuple[str | None, Path | None]:
 
 
 def init(state: AgentState) -> dict:
-    """Initializes the agent's soul and ensures memory files exist.
+    """Initializes the agent's soul, builds the memory index, and reads project docs.
 
-    Also resolves and reads project documentation (AGENTS.md / CLAUDE.md) from
-    both soul_memory_path (global scope) and workspace_path (workspace scope).
-    Each doc is injected fresh every turn so changes appear on the next turn.
+    On every turn:
+    - Ensures soul.md exists (creating from the default template if absent).
+    - Builds MEMORY.md from memory/ files under soul_memory_path and carries the
+      index content through state so Context can inject it.
+    - Resolves and reads project docs (AGENTS.md / CLAUDE.md) from both
+      soul_memory_path (global scope) and workspace_path (workspace scope).
 
     Resolved doc paths are registered in ``file_hashes`` with their current
     content hash so the staleness node can detect external edits on subsequent
@@ -37,9 +41,7 @@ def init(state: AgentState) -> dict:
     if not soul_path.exists():
         soul_path.write_text(_DEFAULT_SOUL)
 
-    universal_memory_path = soul_memory_path / "memory.md"
-    if not universal_memory_path.exists():
-        universal_memory_path.write_text("# Universal Memory\n")
+    memory_index = build_memory_index(soul_memory_path)
 
     global_doc_content, global_doc_path = _read_project_doc(soul_memory_path)
     workspace_doc_content, workspace_doc_path = _read_project_doc(state["workspace_path"])
@@ -54,6 +56,7 @@ def init(state: AgentState) -> dict:
 
     result: dict = {
         "soul": soul_path.read_text(),
+        "memory_index": memory_index,
         "global_project_doc": global_doc_content,
         "workspace_project_doc": workspace_doc_content,
     }

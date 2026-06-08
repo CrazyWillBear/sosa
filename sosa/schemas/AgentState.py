@@ -67,6 +67,10 @@ class AgentState(TypedDict):
     # Populated by read_file; resets each new session.
     file_hashes: Annotated[dict[str, str], merge_file_hashes]
 
+    # Memory index built by the init node from memory/ files under soul_memory_path.
+    # None when no memory/ directory or no .md files exist there.
+    memory_index: str | None
+
     # Project documentation injected fresh each turn.
     # Resolved by the init node: AGENTS.md preferred, CLAUDE.md fallback.
     # None when no matching doc exists in the scope directory.

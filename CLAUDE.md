@@ -42,7 +42,7 @@ Sosa is a LangGraph-based ReAct agent. The core class is `sosa/Sosa.py`, which c
 START → init → cleanup → compacter → staleness → react → tool_node → (react | END)
 ```
 
-- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from `soul_memory_path` (creating it from `sosa/prompts/Soul.md` if absent). Ensures the universal `memory.md` exists in `soul_memory_path`. Also resolves and reads project docs (`AGENTS.md` preferred, `CLAUDE.md` fallback) from both `soul_memory_path` (global scope) and `workspace_path` (workspace scope), injecting them fresh each turn.
+- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from `soul_memory_path` (creating it from `sosa/prompts/Soul.md` if absent). Builds `MEMORY.md` at `soul_memory_path/MEMORY.md` from per-fact files in `soul_memory_path/memory/` (each with YAML frontmatter). Also resolves and reads project docs (`AGENTS.md` preferred, `CLAUDE.md` fallback) from both `soul_memory_path` (global scope) and `workspace_path` (workspace scope), injecting them fresh each turn.
 - **cleanup** (`sosa/graph/nodes/cleanup.py`): Stale `read_file` tool results are replaced with a placeholder each turn so they don't bloat context.
 - **compacter** (`sosa/graph/nodes/compacter.py`): When message history exceeds ~70k tokens, summarizes all but the last 10 messages using the base model and replaces them with a `SystemMessage` summary.
 - **staleness** (`sosa/graph/nodes/staleness.py`): Compares each tracked file's current on-disk hash against its stored baseline. Injects a single `SystemMessage` naming any changed or deleted files. Refreshes baselines so each change is reported only once.
@@ -51,7 +51,7 @@ START → init → cleanup → compacter → staleness → react → tool_node �
 
 ### Context Construction
 
-`sosa/schemas/Context.py` assembles what the model sees each turn, in order: the system prompt (from `sosa/prompts/Prompt.md` template filled with name/prompt/workspace), `soul.md`, the global project doc, the workspace project doc, the MCP addendum (`McpAddendum.md`, only if MCP tools are loaded), then the message history. Project docs are resolved fresh each turn (`AGENTS.md` preferred, `CLAUDE.md` fallback) at both `soul_memory_path` and `workspace_path`; absent docs are skipped. `memory.md` is **not** part of this assembly.
+`sosa/schemas/Context.py` assembles what the model sees each turn, in order: the system prompt (from `sosa/prompts/Prompt.md` template filled with name/prompt/workspace), `soul.md`, the `MEMORY.md` index (if any memory files exist), the global project doc, the workspace project doc, the MCP addendum (`McpAddendum.md`, only if MCP tools are loaded), then the message history. Project docs are resolved fresh each turn (`AGENTS.md` preferred, `CLAUDE.md` fallback) at both `soul_memory_path` and `workspace_path`; absent docs are skipped.
 
 ### Basic Tools
 
@@ -63,10 +63,11 @@ By default, every agent includes: `run_bash_command`, `write_file`, `edit_file`,
 
 ### Persistent Memory
 
-One shared memory location in `soul_memory_path/` (default `~/sosa/`):
+Shared memory lives in `soul_memory_path/` (default `~/sosa/`):
 
 - `soul.md` — personality/behavior config, editable to change agent character
-- `memory.md` — universal memory; the agent reads and writes it to persist facts across conversations
+- `memory/` — directory of per-fact markdown files; each file opens with YAML frontmatter (`description`, `type`) followed by an optional body. The init node builds `MEMORY.md` from these files each turn and injects it into context.
+- `MEMORY.md` — auto-generated index; do not edit by hand (regenerated every turn from `memory/`)
 
 Workspace-specific context is stored in the workspace project doc (`AGENTS.md` or `CLAUDE.md` in `workspace_path/`), which is auto-injected each turn. The agent creates or edits it to persist workspace details.
 
@@ -77,7 +78,7 @@ Each turn, project documentation is auto-read and injected from two scopes:
 - **Global scope** (`soul_memory_path/`): `AGENTS.md` preferred, `CLAUDE.md` fallback.
 - **Workspace scope** (`workspace_path/`): same precedence.
 
-Resolved by `sosa/graph/nodes/project_docs.py::resolve_project_doc` and read in `init`. If absent at a scope, nothing is injected for that slot. Context injection order: system prompt → soul → global doc → workspace doc → MCP addendum → messages.
+Resolved by `sosa/graph/nodes/project_docs.py::resolve_project_doc` and read in `init`. If absent at a scope, nothing is injected for that slot. Context injection order: system prompt → soul → MEMORY.md index → global doc → workspace doc → MCP addendum → messages.
 
 ### Skills
 

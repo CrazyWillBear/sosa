@@ -213,13 +213,13 @@ class TestInitNodeProjectDocs:
 
 
 # ---------------------------------------------------------------------------
-# Init memory file creation behavior (issue #12)
+# Init memory file behavior (issue #12 / issue #16)
 # ---------------------------------------------------------------------------
 
 
 class TestInitMemoryFiles:
-    def test_universal_memory_created_on_fresh_soul_path(self, tmp_path: Path) -> None:
-        """init still creates <soul_memory_path>/memory.md when absent."""
+    def test_universal_memory_not_created_on_fresh_soul_path(self, tmp_path: Path) -> None:
+        """init must NOT create soul_memory_path/memory.md (retired in issue #16)."""
         from sosa.graph.nodes.init import init
 
         soul_path = tmp_path / "soul"
@@ -230,7 +230,9 @@ class TestInitMemoryFiles:
         state = _make_init_state(soul_path, workspace)
         init(state)
 
-        assert (soul_path / "memory.md").exists()
+        assert not (soul_path / "memory.md").exists(), (
+            "init must not create memory.md — that file is retired (issue #16)"
+        )
 
     def test_universal_memory_not_overwritten_when_present(self, tmp_path: Path) -> None:
         """init does not overwrite <soul_memory_path>/memory.md when it already exists."""
