@@ -18,12 +18,22 @@ def _is_memory_dir_file(file_path: str, soul_memory_path: Path | None) -> bool:
     basename (issue #20).  Under the new per-fact memory model, individual facts
     live as soul_memory_path/memory/<name>.md, and those are the files that should
     be pinned so a just-recalled fact is not stripped mid-turn.
+
+    Relative paths (e.g. "memory/<name>.md" as emitted by the MEMORY.md index) are
+    resolved against soul_memory_path before comparison, mirroring the idiom used
+    in sosa/tools/FileOps.py::_is_allowed.
     """
     if not soul_memory_path:
         return False
     try:
         p = Path(file_path)
-        memory_dir = soul_memory_path / "memory"
+        # Resolve relative paths against soul_memory_path (the dir that owns memory/).
+        # Absolute paths are resolved in place (resolve() normalises .. and symlinks).
+        if not p.is_absolute():
+            p = (soul_memory_path / p).resolve()
+        else:
+            p = p.resolve()
+        memory_dir = soul_memory_path.resolve() / "memory"
         p.relative_to(memory_dir)  # raises ValueError if not under memory_dir
         return True
     except ValueError:

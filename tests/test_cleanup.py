@@ -238,3 +238,55 @@ class TestMemoryDirFilesPinned:
         assert tool_msgs[0].content == _READ_PLACEHOLDER, (
             "File outside soul_memory_path/memory/ should be cleaned"
         )
+
+    def test_relative_memory_path_is_pinned(self, tmp_path: Path) -> None:
+        """A relative path 'memory/<name>.md' (as emitted by MEMORY.md index) must be pinned.
+
+        The index built by memory_index.py uses relative links of the form
+        'memory/<stem>.md', so this is the most natural path the model copies into
+        a read_file/edit_file call.  Without resolving against soul_memory_path,
+        Path.relative_to() raises ValueError and the file is incorrectly cleaned.
+        """
+        soul_path = tmp_path / "soul"
+        (soul_path / "memory").mkdir(parents=True)
+
+        # Relative path as emitted by the MEMORY.md index
+        relative_path = "memory/work_context.md"
+
+        tc_id = "tc-rel-mem-read-1"
+        messages = [
+            _ai_tool_call(tc_id, "read_file", {"file_path": relative_path}),
+            _tool_result(tc_id, "fact: the project uses Python"),
+        ]
+        state = _make_state(messages, soul_memory_path=soul_path)
+        result = cleanup(state)
+
+        all_msgs = result.get("messages", [])
+        tool_msgs = [m for m in all_msgs if isinstance(m, ToolMessage) and m.tool_call_id == tc_id]
+        # The read must NOT be replaced with the placeholder
+        for m in tool_msgs:
+            assert m.content != _READ_PLACEHOLDER, (
+                "Relative memory/ path was cleaned — it should be pinned"
+            )
+
+    def test_relative_non_memory_path_is_cleaned(self, tmp_path: Path) -> None:
+        """A relative path 'other/notes.md' that does NOT resolve under memory/ must be cleaned."""
+        soul_path = tmp_path / "soul"
+        (soul_path / "other").mkdir(parents=True)
+
+        relative_outside = "other/notes.md"
+
+        tc_id = "tc-rel-nonmem-1"
+        messages = [
+            _ai_tool_call(tc_id, "read_file", {"file_path": relative_outside}),
+            _tool_result(tc_id, "some notes"),
+        ]
+        state = _make_state(messages, soul_memory_path=soul_path)
+        result = cleanup(state)
+
+        all_msgs = result.get("messages", [])
+        tool_msgs = [m for m in all_msgs if isinstance(m, ToolMessage) and m.tool_call_id == tc_id]
+        assert tool_msgs, "Expected replacement for relative path outside memory/"
+        assert tool_msgs[0].content == _READ_PLACEHOLDER, (
+            "Relative path outside memory/ should be cleaned"
+        )
