@@ -38,6 +38,13 @@ To customize the agent's personality or behavior, ask your agent to edit their `
 
 The agent also maintains a `memory.md` file in its workspace. It writes to this file to persist information across conversations — it's injected as context every turn, so anything stored there is always available to the agent.
 
+You can also steer agent behavior with **project docs** (`AGENTS.md` / `CLAUDE.md`). Each turn, the agent automatically reads and injects these files from two scopes — no `read_file` call needed:
+
+- **Global scope** (`SOUL_MEMORY_DIR/`, default `~/sosa/`) — shared across all workspaces.
+- **Workspace scope** (`WORKSPACE/`, default `./workspace/`) — specific to the current workspace.
+
+At each scope, `AGENTS.md` is preferred; `CLAUDE.md` is the fallback. If neither exists at a scope, nothing is injected for that slot. Create or edit either file to add standing instructions, project context, or behavioral constraints — changes take effect on the next turn.
+
 ## Configuration
 
 Edit `cli/config.py` to customize the agent before running:
