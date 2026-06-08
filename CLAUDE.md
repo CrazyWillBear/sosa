@@ -46,7 +46,7 @@ START → init → cleanup → compacter → staleness → react → tool_node �
 - **cleanup** (`sosa/graph/nodes/cleanup.py`): Stale `read_file` tool results are replaced with a placeholder each turn so they don't bloat context.
 - **compacter** (`sosa/graph/nodes/compacter.py`): When message history exceeds ~70k tokens, summarizes all but the last 10 messages using the base model and replaces them with a `SystemMessage` summary.
 - **staleness** (`sosa/graph/nodes/staleness.py`): Compares each tracked file's current on-disk hash against its stored baseline. Injects a single `SystemMessage` naming any changed or deleted files. Refreshes baselines so each change is reported only once.
-- **react** (`sosa/graph/nodes/react.py`): Invokes the model with the full context (system prompt + soul.md + global project doc + workspace project doc + MCP addendum if present + messages). Note: `memory.md` is **not** auto-injected; the agent reads/writes it on demand via the file tools.
+- **react** (`sosa/graph/nodes/react.py`): Invokes the model with the full context (system prompt + soul.md + MEMORY.md index + global project doc + workspace project doc + MCP addendum if present + messages). Individual `memory/<name>.md` files are NOT auto-injected; the agent reads them on demand via `read_file` after spotting a relevant entry in the MEMORY.md index.
 - **tool_node**: LangGraph's `ToolNode` dispatches tool calls. The loop ends when the model makes no tool calls.
 
 ### Context Construction
