@@ -46,12 +46,12 @@ START → init → cleanup → compacter → staleness → react → tool_node �
 - **cleanup** (`sosa/graph/nodes/cleanup.py`): Stale `read_file` tool results are replaced with a placeholder each turn so they don't bloat context.
 - **compacter** (`sosa/graph/nodes/compacter.py`): When message history exceeds ~70k tokens, summarizes all but the last 10 messages using the base model and replaces them with a `SystemMessage` summary.
 - **staleness** (`sosa/graph/nodes/staleness.py`): Compares each tracked file's current on-disk hash against its stored baseline. Injects a single `SystemMessage` naming any changed or deleted files. Refreshes baselines so each change is reported only once.
-- **react** (`sosa/graph/nodes/react.py`): Invokes the model with the full context (system prompt + soul.md + universal memory.md + messages).
+- **react** (`sosa/graph/nodes/react.py`): Invokes the model with the full context (system prompt + soul.md + global project doc + workspace project doc + MCP addendum if present + messages). Note: `memory.md` is **not** auto-injected; the agent reads/writes it on demand via the file tools.
 - **tool_node**: LangGraph's `ToolNode` dispatches tool calls. The loop ends when the model makes no tool calls.
 
 ### Context Construction
 
-`sosa/schemas/Context.py` assembles what the model sees each turn: the system prompt (from `sosa/prompts/Prompt.md` template filled with name/prompt/workspace), `soul.md`, and the message history. If MCP tools are loaded, a `McpAddendum.md` system message is appended.
+`sosa/schemas/Context.py` assembles what the model sees each turn, in order: the system prompt (from `sosa/prompts/Prompt.md` template filled with name/prompt/workspace), `soul.md`, the global project doc, the workspace project doc, the MCP addendum (`McpAddendum.md`, only if MCP tools are loaded), then the message history. Project docs are resolved fresh each turn (`AGENTS.md` preferred, `CLAUDE.md` fallback) at both `soul_memory_path` and `workspace_path`; absent docs are skipped. `memory.md` is **not** part of this assembly.
 
 ### Basic Tools
 
