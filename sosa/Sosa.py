@@ -171,6 +171,9 @@ class Sosa:
             "approval_fn": self.approval_fn,
             # Seed from the instance store so cross-turn baselines are visible.
             "file_hashes": dict(self._file_hashes),
+            # Project docs are resolved fresh each turn by the init node.
+            "global_project_doc": None,
+            "workspace_project_doc": None,
         }
 
         # Track the accumulated file_hashes as update deltas flow in.

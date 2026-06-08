@@ -66,3 +66,9 @@ class AgentState(TypedDict):
     # Per-session file content fingerprints: path → SHA-256 hex digest.
     # Populated by read_file; resets each new session.
     file_hashes: Annotated[dict[str, str], merge_file_hashes]
+
+    # Project documentation injected fresh each turn.
+    # Resolved by the init node: AGENTS.md preferred, CLAUDE.md fallback.
+    # None when no matching doc exists in the scope directory.
+    global_project_doc: str | None      # From soul_memory_path
+    workspace_project_doc: str | None   # From workspace_path

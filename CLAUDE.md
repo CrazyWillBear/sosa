@@ -42,7 +42,7 @@ Sosa is a LangGraph-based ReAct agent. The core class is `sosa/Sosa.py`, which c
 START → init → cleanup → compacter → staleness → react → tool_node → (react | END)
 ```
 
-- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from `soul_memory_path` (creating it from `sosa/prompts/Soul.md` if absent). Ensures both universal `memory.md` and workspace `memory.md` exist.
+- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from `soul_memory_path` (creating it from `sosa/prompts/Soul.md` if absent). Ensures both universal `memory.md` and workspace `memory.md` exist. Also resolves and reads project docs (`AGENTS.md` preferred, `CLAUDE.md` fallback) from both `soul_memory_path` (global scope) and `workspace_path` (workspace scope), injecting them fresh each turn.
 - **cleanup** (`sosa/graph/nodes/cleanup.py`): Stale `read_file` tool results are replaced with a placeholder each turn so they don't bloat context.
 - **compacter** (`sosa/graph/nodes/compacter.py`): When message history exceeds ~70k tokens, summarizes all but the last 10 messages using the base model and replaces them with a `SystemMessage` summary.
 - **staleness** (`sosa/graph/nodes/staleness.py`): Compares each tracked file's current on-disk hash against its stored baseline. Injects a single `SystemMessage` naming any changed or deleted files. Refreshes baselines so each change is reported only once.
@@ -72,6 +72,15 @@ Two separate memory locations, configured independently:
   - `memory.md` — workspace-specific memory injected every turn
 
 Both `memory.md` files are injected as system messages every turn. The agent writes to them to persist information across conversations.
+
+### Project Docs (AGENTS.md / CLAUDE.md)
+
+Each turn, project documentation is auto-read and injected from two scopes:
+
+- **Global scope** (`soul_memory_path/`): `AGENTS.md` preferred, `CLAUDE.md` fallback.
+- **Workspace scope** (`workspace_path/`): same precedence.
+
+Resolved by `sosa/graph/nodes/project_docs.py::resolve_project_doc` and read in `init`. If absent at a scope, nothing is injected for that slot. Context injection order: system prompt → soul → global doc → workspace doc → MCP addendum → messages.
 
 ### Skills
 
