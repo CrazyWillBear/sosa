@@ -12,6 +12,7 @@ from sosa.graph.nodes.cleanup import cleanup
 from sosa.graph.nodes.compacter import compacter
 from sosa.graph.nodes.init import init
 from sosa.graph.nodes.react import react
+from sosa.graph.nodes.staleness import staleness
 from sosa.schemas.AgentState import AgentState
 from sosa.tools.Bash import run_bash_command
 from sosa.tools.FileOps import write_file, edit_file, read_file
@@ -126,13 +127,15 @@ class Sosa:
         graph.add_node("init", init)
         graph.add_node("cleanup", cleanup)
         graph.add_node("compacter", compacter)
+        graph.add_node("staleness", staleness)
         graph.add_node("react", react)
         graph.add_node("tool_node", ToolNode(self.tools))
 
         graph.add_edge(START, "init")
         graph.add_edge("init", "cleanup")
         graph.add_edge("cleanup", "compacter")
-        graph.add_edge("compacter", "react")
+        graph.add_edge("compacter", "staleness")
+        graph.add_edge("staleness", "react")
         graph.add_conditional_edges("react", tools_condition, {"tools": "tool_node", END: END})
         graph.add_edge("tool_node", "react")
 
