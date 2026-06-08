@@ -2,7 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Running the Agent
+## Setup
+
+Requires Python 3.14+.
+
+```bash
+python3.14 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Add API keys to `.env` in the project root:
+```
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+GROQ_API_KEY=...
+```
 
 **CLI (interactive chat):**
 ```bash
@@ -19,18 +34,19 @@ Tests live in `tests/`. This is the project's done-check — run it before decla
 
 ## Architecture
 
-Sosa is a LangGraph-based ReAct agent. The core class is `sosa/Sosa.py`, which compiles a `StateGraph` and exposes a `run()` generator that yields new messages as the agent works through its turn.
+Sosa is a LangGraph-based ReAct agent. The core class is `sosa/Sosa.py`, which compiles a `StateGraph` and exposes a `run()` async generator that yields new messages as the agent works through its turn.
 
 ### Graph Flow
 
 ```
-START → init → cleanup → react → tool_node → (react | END)
+START → init → cleanup → compacter → react → tool_node → (react | END)
 ```
 
-- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from the workspace (creating it from `sosa/prompts/Soul.md` if absent). Also ensures `memory.md` exists.
+- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from `soul_memory_path` (creating it from `sosa/prompts/Soul.md` if absent). Ensures both universal `memory.md` and workspace `memory.md` exist.
 - **cleanup** (`sosa/graph/nodes/cleanup.py`): Stale `read_file` tool results are replaced with a placeholder each turn so they don't bloat context.
+- **compacter** (`sosa/graph/nodes/compacter.py`): When message history exceeds ~70k tokens, summarizes all but the last 10 messages using the base model and replaces them with a `SystemMessage` summary.
 - **react** (`sosa/graph/nodes/react.py`): Invokes the model with the full context (system prompt + soul.md + memory.md + messages).
-- **tool_node**: LangGraph's `ToolNode` dispatches tool calls. The loop ends when `end_turn` is called (sets `turn_over = True`) or when the model makes no tool calls.
+- **tool_node**: LangGraph's `ToolNode` dispatches tool calls. The loop ends when the model makes no tool calls.
 
 ### Context Construction
 
@@ -46,9 +62,19 @@ By default, every agent includes: `run_bash_command`, `write_file`, `edit_file`,
 
 ### Persistent Memory
 
-The agent maintains two files in its workspace:
-- `workspace/soul.md` — personality/behavior config, editable to change agent character
-- `workspace/memory.md` — injected as a system message every turn; the agent writes to it to persist information across conversations
+Two separate memory locations, configured independently:
+
+- **`soul_memory_path/`** (default `~/sosa/`) — shared across all workspaces:
+  - `soul.md` — personality/behavior config, editable to change agent character
+  - `memory.md` — universal memory injected every turn
+- **`workspace_path/`** (default `./workspace/`) — per-workspace:
+  - `memory.md` — workspace-specific memory injected every turn
+
+Both `memory.md` files are injected as system messages every turn. The agent writes to them to persist information across conversations.
+
+### Skills
+
+`skills_path` (default `~/sosa/skills/`) points to a directory of subdirectories, each representing a skill. The skill names are listed in the system prompt so the agent knows what capabilities are available. Skills are not auto-invoked; the agent decides when to use them.
 
 ### MCP Support
 
@@ -56,7 +82,16 @@ MCP servers are configured in `cli/config.py` (or inline) as a dict passed to `S
 
 ### Models
 
-`models/Groq.py` exports `oss_120b` (a `ChatGroq` instance). To use a different model, pass any `BaseChatModel` to `Sosa(model=...)`.
+Any `BaseChatModel` can be passed to `Sosa(model=...)`. Pre-configured instances live in `models/`:
+
+| File | Exports |
+|------|---------|
+| `models/Anthropic.py` | `claude_opus_4_6`, `claude_sonnet_4_6`, `claude_haiku_4_5`, `claude_sonnet_3_7` |
+| `models/OpenAI.py` | `gpt_5_mini`, `gpt_5`, `gpt_5_4`, `gpt_4o` |
+| `models/Groq.py` | `oss_120b` |
+| `models/Ollama.py` | `llama_m` |
+
+Active model is set via `MODEL` in `cli/config.py`.
 
 ### CLI Layer
 
