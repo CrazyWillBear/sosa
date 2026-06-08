@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from sosa.graph.nodes.memory_index import build_memory_index
+from langchain_core.messages import SystemMessage
+
+from sosa.graph.nodes.memory_index import MalformedMemoryFileError, build_memory_index
 from sosa.graph.nodes.project_docs import resolve_project_doc
 from sosa.schemas.AgentState import AgentState, REMOVE
 from sosa.tools.hashing import hash_file
@@ -101,9 +103,18 @@ def init(state: AgentState) -> dict:
         soul_path.write_text(_DEFAULT_SOUL)
 
     stored_hashes: dict[str, str] = state.get("file_hashes") or {}
-    new_memory_index, memory_hash_updates = _sync_memory_index(
-        soul_memory_path, stored_hashes
-    )
+    memory_index_error: str | None = None
+    try:
+        new_memory_index, memory_hash_updates = _sync_memory_index(
+            soul_memory_path, stored_hashes
+        )
+    except MalformedMemoryFileError as exc:
+        new_memory_index = None
+        memory_hash_updates = {}
+        memory_index_error = (
+            f"[Memory index error] {exc} "
+            f"Fix the frontmatter in the file above to restore the memory index."
+        )
 
     global_doc_content, global_doc_path = _read_project_doc(soul_memory_path)
     workspace_doc_content, workspace_doc_path = _read_project_doc(state["workspace_path"])
@@ -129,4 +140,6 @@ def init(state: AgentState) -> dict:
 
     if file_hashes:
         result["file_hashes"] = file_hashes
+    if memory_index_error:
+        result["messages"] = [SystemMessage(content=memory_index_error)]
     return result

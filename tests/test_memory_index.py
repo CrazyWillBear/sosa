@@ -722,3 +722,185 @@ class TestMemoryFilesRideStaleness:
             f"Staleness message must name the changed memory file. Got: {combined}"
         )
         assert "changed" in combined.lower()
+
+
+# ---------------------------------------------------------------------------
+# Malformed frontmatter error handling (issue #18)
+# ---------------------------------------------------------------------------
+
+
+class TestMalformedFrontmatter:
+    """build_memory_index raises MalformedMemoryFileError for broken files."""
+
+    def test_missing_frontmatter_raises(self, tmp_path: Path) -> None:
+        """A file with no --- block raises MalformedMemoryFileError naming the file."""
+        from sosa.graph.nodes.memory_index import MalformedMemoryFileError
+
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        bad = memory_dir / "broken.md"
+        bad.write_text("No frontmatter here, just plain text.\n")
+
+        with pytest.raises(MalformedMemoryFileError) as exc_info:
+            build_memory_index(tmp_path)
+
+        assert "broken.md" in str(exc_info.value)
+
+    def test_missing_description_raises(self, tmp_path: Path) -> None:
+        """A file with frontmatter but no description field raises MalformedMemoryFileError."""
+        from sosa.graph.nodes.memory_index import MalformedMemoryFileError
+
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        bad = memory_dir / "nodesc.md"
+        bad.write_text("---\ntype: user\n---\nBody text.\n")
+
+        with pytest.raises(MalformedMemoryFileError) as exc_info:
+            build_memory_index(tmp_path)
+
+        assert "nodesc.md" in str(exc_info.value)
+
+    def test_missing_type_raises(self, tmp_path: Path) -> None:
+        """A file with frontmatter but no type field raises MalformedMemoryFileError."""
+        from sosa.graph.nodes.memory_index import MalformedMemoryFileError
+
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        bad = memory_dir / "notype.md"
+        bad.write_text("---\ndescription: A note\n---\nBody text.\n")
+
+        with pytest.raises(MalformedMemoryFileError) as exc_info:
+            build_memory_index(tmp_path)
+
+        assert "notype.md" in str(exc_info.value)
+
+    def test_empty_frontmatter_raises(self, tmp_path: Path) -> None:
+        """A file with an empty --- block raises MalformedMemoryFileError."""
+        from sosa.graph.nodes.memory_index import MalformedMemoryFileError
+
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        bad = memory_dir / "empty_fm.md"
+        bad.write_text("---\n---\nBody.\n")
+
+        with pytest.raises(MalformedMemoryFileError) as exc_info:
+            build_memory_index(tmp_path)
+
+        assert "empty_fm.md" in str(exc_info.value)
+
+    def test_well_formed_file_unaffected_by_bad_sibling(self, tmp_path: Path) -> None:
+        """A bad file raises before the good file is silently dropped (fail loud)."""
+        from sosa.graph.nodes.memory_index import MalformedMemoryFileError
+
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        # good file
+        good = memory_dir / "alice.md"
+        good.write_text("---\ndescription: Alice\ntype: user\n---\n")
+        # bad file (comes first alphabetically)
+        bad = memory_dir / "aaaa_bad.md"
+        bad.write_text("no frontmatter\n")
+
+        with pytest.raises(MalformedMemoryFileError) as exc_info:
+            build_memory_index(tmp_path)
+
+        assert "aaaa_bad.md" in str(exc_info.value)
+
+
+class TestInitMalformedFrontmatter:
+    """init node catches MalformedMemoryFileError and injects a recoverable SystemMessage."""
+
+    def _make_state(self, soul_path: Path, workspace: Path) -> dict:
+        return {
+            "soul_memory_path": soul_path,
+            "workspace_path": workspace,
+        }
+
+    def test_init_injects_system_message_on_bad_file(self, tmp_path: Path) -> None:
+        """init returns a SystemMessage in messages when a memory file is malformed."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        memory_dir = soul_path / "memory"
+        memory_dir.mkdir()
+        bad = memory_dir / "broken.md"
+        bad.write_text("no frontmatter here\n")
+
+        state = self._make_state(soul_path, workspace)
+        result = init(state)
+
+        msgs = result.get("messages", [])
+        if not isinstance(msgs, list):
+            msgs = [msgs]
+        sys_msgs = [m for m in msgs if isinstance(m, SystemMessage)]
+
+        assert sys_msgs, "Expected a SystemMessage when a memory file is malformed"
+        combined = " ".join(m.content for m in sys_msgs)
+        assert "broken.md" in combined
+
+    def test_init_does_not_crash_on_bad_file(self, tmp_path: Path) -> None:
+        """init must not raise uncatchably when a memory file is malformed."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        memory_dir = soul_path / "memory"
+        memory_dir.mkdir()
+        (memory_dir / "broken.md").write_text("no frontmatter here\n")
+
+        state = self._make_state(soul_path, workspace)
+        # Must not raise
+        result = init(state)
+        assert isinstance(result, dict)
+
+    def test_init_names_file_in_error_message(self, tmp_path: Path) -> None:
+        """The agent-visible error message names the offending file."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        memory_dir = soul_path / "memory"
+        memory_dir.mkdir()
+        (memory_dir / "myfact.md").write_text("---\ntype: user\n---\n")  # missing description
+
+        state = self._make_state(soul_path, workspace)
+        result = init(state)
+
+        msgs = result.get("messages", [])
+        if not isinstance(msgs, list):
+            msgs = [msgs]
+        sys_msgs = [m for m in msgs if isinstance(m, SystemMessage)]
+        combined = " ".join(m.content for m in sys_msgs)
+        assert "myfact.md" in combined
+
+    def test_good_files_build_index_when_no_bad_files(self, tmp_path: Path) -> None:
+        """Well-formed files produce a correct index (unaffected by the error path)."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        _write_memory_file(soul_path, "alice", "user", "Alice is the user")
+
+        state = self._make_state(soul_path, workspace)
+        result = init(state)
+
+        assert result.get("memory_index") is not None
+        assert "alice" in result["memory_index"]
+        # No error message when files are well-formed
+        msgs = result.get("messages", [])
+        if not isinstance(msgs, list):
+            msgs = [msgs]
+        assert not msgs, "No messages expected when all memory files are well-formed"
