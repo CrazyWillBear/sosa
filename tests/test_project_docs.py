@@ -544,3 +544,262 @@ class TestPromptMdDescribesAutoread:
         content = self._read_prompt()
         # Should describe the autoread (injected/auto-read/loaded) behavior
         assert any(w in content.lower() for w in ("auto", "inject", "preload", "loaded", "each turn"))
+
+
+# ---------------------------------------------------------------------------
+# Issue #11: hash-track project docs in file_hashes (AC1–AC4)
+# ---------------------------------------------------------------------------
+
+
+class TestInitNodeRegistersProjectDocHashes:
+    """init node must populate file_hashes for each resolved project doc.
+
+    AC1: After a turn, each resolved project-doc path is present in file_hashes
+         with its current content hash.
+    AC3: A project doc that does not exist is not registered (no phantom tracking).
+    AC4: Hash registration works for both workspace and global resolved docs.
+    """
+
+    def test_global_doc_hash_registered(self, tmp_path: Path) -> None:
+        """Global project doc path → hash must appear in init return value."""
+        from sosa.graph.nodes.init import init
+        from sosa.tools.hashing import hash_file
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        doc = soul_path / "AGENTS.md"
+        doc.write_text("# Global AGENTS doc")
+
+        state = _make_init_state(soul_path, workspace)
+        result = init(state)
+
+        assert "file_hashes" in result, "init must return file_hashes when project docs exist"
+        assert str(doc) in result["file_hashes"], (
+            f"global doc path '{doc}' must be in file_hashes"
+        )
+        assert result["file_hashes"][str(doc)] == hash_file(doc)
+
+    def test_workspace_doc_hash_registered(self, tmp_path: Path) -> None:
+        """Workspace project doc path → hash must appear in init return value."""
+        from sosa.graph.nodes.init import init
+        from sosa.tools.hashing import hash_file
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        doc = workspace / "CLAUDE.md"
+        doc.write_text("# Workspace CLAUDE doc")
+
+        state = _make_init_state(soul_path, workspace)
+        result = init(state)
+
+        assert "file_hashes" in result, "init must return file_hashes when project docs exist"
+        assert str(doc) in result["file_hashes"], (
+            f"workspace doc path '{doc}' must be in file_hashes"
+        )
+        assert result["file_hashes"][str(doc)] == hash_file(doc)
+
+    def test_both_docs_registered(self, tmp_path: Path) -> None:
+        """Both global and workspace docs must be registered when both exist."""
+        from sosa.graph.nodes.init import init
+        from sosa.tools.hashing import hash_file
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        global_doc = soul_path / "AGENTS.md"
+        global_doc.write_text("# Global AGENTS")
+        workspace_doc = workspace / "AGENTS.md"
+        workspace_doc.write_text("# Workspace AGENTS")
+
+        state = _make_init_state(soul_path, workspace)
+        result = init(state)
+
+        assert "file_hashes" in result
+        assert str(global_doc) in result["file_hashes"]
+        assert str(workspace_doc) in result["file_hashes"]
+        assert result["file_hashes"][str(global_doc)] == hash_file(global_doc)
+        assert result["file_hashes"][str(workspace_doc)] == hash_file(workspace_doc)
+
+    def test_absent_global_doc_not_registered(self, tmp_path: Path) -> None:
+        """When global doc does not exist, no phantom hash is registered for it."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        # No doc in soul_path
+        workspace_doc = workspace / "CLAUDE.md"
+        workspace_doc.write_text("workspace only")
+
+        state = _make_init_state(soul_path, workspace)
+        result = init(state)
+
+        file_hashes = result.get("file_hashes", {})
+        for key in file_hashes:
+            assert not key.startswith(str(soul_path)), (
+                f"Phantom hash registered for absent global doc: {key}"
+            )
+
+    def test_absent_workspace_doc_not_registered(self, tmp_path: Path) -> None:
+        """When workspace doc does not exist, no phantom hash is registered for it."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        # No doc in workspace
+        global_doc = soul_path / "AGENTS.md"
+        global_doc.write_text("global only")
+
+        state = _make_init_state(soul_path, workspace)
+        result = init(state)
+
+        file_hashes = result.get("file_hashes", {})
+        for key in file_hashes:
+            assert not key.startswith(str(workspace)), (
+                f"Phantom hash registered for absent workspace doc: {key}"
+            )
+
+    def test_no_docs_no_file_hashes_entry(self, tmp_path: Path) -> None:
+        """When neither scope has a doc, file_hashes need not be set (or may be empty)."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        state = _make_init_state(soul_path, workspace)
+        result = init(state)
+
+        file_hashes = result.get("file_hashes", {})
+        assert file_hashes == {}, (
+            "file_hashes must be empty (or absent) when no project docs exist"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Issue #11: AC2 — staleness notice emitted when project doc changes externally
+# ---------------------------------------------------------------------------
+
+
+class TestProjectDocStalenessNotice:
+    """Editing a tracked project doc externally drives staleness node to emit a notice.
+
+    This test drives the real init → staleness pipeline (without a live model)
+    to verify that the hash registered by init feeds into staleness on the next call.
+    """
+
+    def test_changed_global_doc_triggers_staleness(self, tmp_path: Path) -> None:
+        """Editing the global project doc between turns produces a staleness SystemMessage."""
+        from sosa.graph.nodes.init import init
+        from sosa.graph.nodes.staleness import staleness
+        from sosa.schemas.AgentState import merge_file_hashes
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        doc = soul_path / "AGENTS.md"
+        doc.write_text("version 1")
+
+        # Turn 1: init registers the hash
+        state = _make_init_state(soul_path, workspace)
+        init_result = init(state)
+        file_hashes = merge_file_hashes({}, init_result.get("file_hashes", {}))
+
+        # External edit between turns
+        doc.write_text("version 2 — externally changed")
+
+        # Turn 2 staleness check
+        staleness_state = {"file_hashes": file_hashes, "messages": []}
+        staleness_result = staleness(staleness_state)
+
+        sys_msgs = [
+            m for m in staleness_result.get("messages", [])
+            if hasattr(m, "content")
+            and "changed" in m.content.lower()
+        ]
+        assert sys_msgs, (
+            "Expected a staleness SystemMessage after externally editing the global project doc. "
+            f"staleness_result: {staleness_result}"
+        )
+        combined = " ".join(m.content for m in sys_msgs)
+        assert doc.name in combined or str(doc) in combined, (
+            f"Staleness message should name the changed doc. Got: {combined}"
+        )
+
+    def test_changed_workspace_doc_triggers_staleness(self, tmp_path: Path) -> None:
+        """Editing the workspace project doc between turns produces a staleness SystemMessage."""
+        from sosa.graph.nodes.init import init
+        from sosa.graph.nodes.staleness import staleness
+        from sosa.schemas.AgentState import merge_file_hashes
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        doc = workspace / "CLAUDE.md"
+        doc.write_text("workspace v1")
+
+        state = _make_init_state(soul_path, workspace)
+        init_result = init(state)
+        file_hashes = merge_file_hashes({}, init_result.get("file_hashes", {}))
+
+        # External edit
+        doc.write_text("workspace v2 — changed externally")
+
+        staleness_state = {"file_hashes": file_hashes, "messages": []}
+        staleness_result = staleness(staleness_state)
+
+        sys_msgs = [
+            m for m in staleness_result.get("messages", [])
+            if hasattr(m, "content")
+            and "changed" in m.content.lower()
+        ]
+        assert sys_msgs, (
+            "Expected a staleness SystemMessage after externally editing the workspace project doc."
+        )
+        combined = " ".join(m.content for m in sys_msgs)
+        assert doc.name in combined or str(doc) in combined
+
+    def test_unchanged_project_doc_no_staleness(self, tmp_path: Path) -> None:
+        """If the project doc is not changed between turns, no staleness notice is emitted."""
+        from sosa.graph.nodes.init import init
+        from sosa.graph.nodes.staleness import staleness
+        from sosa.schemas.AgentState import merge_file_hashes
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        doc = soul_path / "AGENTS.md"
+        doc.write_text("stable content")
+
+        state = _make_init_state(soul_path, workspace)
+        init_result = init(state)
+        file_hashes = merge_file_hashes({}, init_result.get("file_hashes", {}))
+
+        # No edit — call staleness directly
+        staleness_state = {"file_hashes": file_hashes, "messages": []}
+        staleness_result = staleness(staleness_state)
+
+        sys_msgs = staleness_result.get("messages", [])
+        assert not sys_msgs, (
+            f"Expected no staleness message for unchanged project doc. Got: {sys_msgs}"
+        )
