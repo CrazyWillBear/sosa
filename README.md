@@ -36,7 +36,7 @@ Commands that fall outside the built-in allowlist will pause and ask for your ap
 
 To customize the agent's personality or behavior, ask your agent to edit their `soul.md` file accordingly. Changes take effect on the next turn.
 
-The agent maintains a universal `memory.md` in `soul_memory_path` (default `~/sosa/`), shared across all workspaces. It is **not** auto-injected — the agent reads and writes it on demand to persist facts across conversations. Workspace-specific context lives in the workspace project doc (`AGENTS.md` / `CLAUDE.md` in `WORKSPACE/`), which **is** auto-injected each turn.
+The agent stores memory as individual per-fact files in `soul_memory_path/memory/` (default `~/sosa/memory/`), shared across all workspaces. Each file is a markdown file with YAML frontmatter (`description`, `type`) followed by an optional body. An auto-generated index, `MEMORY.md`, is injected into the agent's context as a system message every turn when any memory files exist — the agent does **not** `read_file` the index, it is already in context. To recall a fact, the agent scans the index descriptions and then uses `read_file` on the relevant per-fact file on demand. To remember something, the agent writes a new `memory/<name>.md` file. **The agent never hand-edits `MEMORY.md` directly** — the index regenerates automatically whenever any `memory/*.md` file is added, changed, or deleted. Workspace-specific context lives in the workspace project doc (`AGENTS.md` / `CLAUDE.md` in `WORKSPACE/`), which **is** auto-injected each turn.
 
 You can also steer agent behavior with **project docs** (`AGENTS.md` / `CLAUDE.md`). Each turn, the agent automatically reads and injects these files from two scopes — no `read_file` call needed:
 
@@ -80,7 +80,7 @@ AGENT_NAME = "Sosa"
 BASE_PROMPT = "You are a general-purpose assistant. Help the user with whatever they need."
 ```
 
-**Soul & universal memory** — set `SOUL_MEMORY_DIR` to the directory where the agent stores its soul and universal memory (shared across all workspaces):
+**Soul & memory** — set `SOUL_MEMORY_DIR` to the directory where the agent stores its soul and per-fact memory files (shared across all workspaces):
 ```python
 SOUL_MEMORY_DIR = Path("/home/you/sosa").resolve()
 ```
