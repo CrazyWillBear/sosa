@@ -213,6 +213,77 @@ class TestInitNodeProjectDocs:
 
 
 # ---------------------------------------------------------------------------
+# Init memory file creation behavior (issue #12)
+# ---------------------------------------------------------------------------
+
+
+class TestInitMemoryFiles:
+    def test_universal_memory_created_on_fresh_soul_path(self, tmp_path: Path) -> None:
+        """init still creates <soul_memory_path>/memory.md when absent."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        state = _make_init_state(soul_path, workspace)
+        init(state)
+
+        assert (soul_path / "memory.md").exists()
+
+    def test_universal_memory_not_overwritten_when_present(self, tmp_path: Path) -> None:
+        """init does not overwrite <soul_memory_path>/memory.md when it already exists."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        (soul_path / "memory.md").write_text("# Existing Universal Memory\nexisting content\n")
+
+        state = _make_init_state(soul_path, workspace)
+        init(state)
+
+        content = (soul_path / "memory.md").read_text()
+        assert "existing content" in content
+
+    def test_workspace_memory_not_created_on_fresh_workspace(self, tmp_path: Path) -> None:
+        """init must NOT create <workspace_path>/memory.md (issue #12)."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        state = _make_init_state(soul_path, workspace)
+        init(state)
+
+        assert not (workspace / "memory.md").exists()
+
+    def test_existing_workspace_memory_left_untouched(self, tmp_path: Path) -> None:
+        """init must not delete or modify an existing <workspace_path>/memory.md."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        original = "# Workspace Memory\nsome project notes\n"
+        (workspace / "memory.md").write_text(original)
+
+        state = _make_init_state(soul_path, workspace)
+        init(state)
+
+        # File must still exist with original content
+        assert (workspace / "memory.md").exists()
+        assert (workspace / "memory.md").read_text() == original
+
+
+# ---------------------------------------------------------------------------
 # Context.to_messages() ordering and injection
 # ---------------------------------------------------------------------------
 

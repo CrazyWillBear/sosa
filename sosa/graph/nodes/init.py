@@ -32,10 +32,6 @@ def init(state: AgentState) -> dict:
     if not universal_memory_path.exists():
         universal_memory_path.write_text("# Universal Memory\n")
 
-    workspace_memory_path = state["workspace_path"] / "memory.md"
-    if not workspace_memory_path.exists():
-        workspace_memory_path.write_text("# Workspace Memory\n")
-
     return {
         "soul": soul_path.read_text(),
         "global_project_doc": _read_project_doc(soul_memory_path),

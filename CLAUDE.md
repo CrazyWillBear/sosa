@@ -42,16 +42,16 @@ Sosa is a LangGraph-based ReAct agent. The core class is `sosa/Sosa.py`, which c
 START → init → cleanup → compacter → staleness → react → tool_node → (react | END)
 ```
 
-- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from `soul_memory_path` (creating it from `sosa/prompts/Soul.md` if absent). Ensures both universal `memory.md` and workspace `memory.md` exist. Also resolves and reads project docs (`AGENTS.md` preferred, `CLAUDE.md` fallback) from both `soul_memory_path` (global scope) and `workspace_path` (workspace scope), injecting them fresh each turn.
+- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from `soul_memory_path` (creating it from `sosa/prompts/Soul.md` if absent). Ensures the universal `memory.md` exists in `soul_memory_path`. Also resolves and reads project docs (`AGENTS.md` preferred, `CLAUDE.md` fallback) from both `soul_memory_path` (global scope) and `workspace_path` (workspace scope), injecting them fresh each turn.
 - **cleanup** (`sosa/graph/nodes/cleanup.py`): Stale `read_file` tool results are replaced with a placeholder each turn so they don't bloat context.
 - **compacter** (`sosa/graph/nodes/compacter.py`): When message history exceeds ~70k tokens, summarizes all but the last 10 messages using the base model and replaces them with a `SystemMessage` summary.
 - **staleness** (`sosa/graph/nodes/staleness.py`): Compares each tracked file's current on-disk hash against its stored baseline. Injects a single `SystemMessage` naming any changed or deleted files. Refreshes baselines so each change is reported only once.
-- **react** (`sosa/graph/nodes/react.py`): Invokes the model with the full context (system prompt + soul.md + memory.md + messages).
+- **react** (`sosa/graph/nodes/react.py`): Invokes the model with the full context (system prompt + soul.md + universal memory.md + messages).
 - **tool_node**: LangGraph's `ToolNode` dispatches tool calls. The loop ends when the model makes no tool calls.
 
 ### Context Construction
 
-`sosa/schemas/Context.py` assembles what the model sees each turn: the system prompt (from `sosa/prompts/Prompt.md` template filled with name/prompt/workspace), `soul.md`, `memory.md`, and the message history. If MCP tools are loaded, a `McpAddendum.md` system message is appended.
+`sosa/schemas/Context.py` assembles what the model sees each turn: the system prompt (from `sosa/prompts/Prompt.md` template filled with name/prompt/workspace), `soul.md`, and the message history. If MCP tools are loaded, a `McpAddendum.md` system message is appended.
 
 ### Basic Tools
 
@@ -63,15 +63,12 @@ By default, every agent includes: `run_bash_command`, `write_file`, `edit_file`,
 
 ### Persistent Memory
 
-Two separate memory locations, configured independently:
+One shared memory location in `soul_memory_path/` (default `~/sosa/`):
 
-- **`soul_memory_path/`** (default `~/sosa/`) — shared across all workspaces:
-  - `soul.md` — personality/behavior config, editable to change agent character
-  - `memory.md` — universal memory injected every turn
-- **`workspace_path/`** (default `./workspace/`) — per-workspace:
-  - `memory.md` — workspace-specific memory injected every turn
+- `soul.md` — personality/behavior config, editable to change agent character
+- `memory.md` — universal memory; the agent reads and writes it to persist facts across conversations
 
-Both `memory.md` files are injected as system messages every turn. The agent writes to them to persist information across conversations.
+Workspace-specific context is stored in the workspace project doc (`AGENTS.md` or `CLAUDE.md` in `workspace_path/`), which is auto-injected each turn. The agent creates or edits it to persist workspace details.
 
 ### Project Docs (AGENTS.md / CLAUDE.md)
 
