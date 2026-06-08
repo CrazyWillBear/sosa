@@ -174,3 +174,54 @@ class TestReadFileRecordsHash:
         import typing
         hints = typing.get_type_hints(AgentState, include_extras=True)
         assert "file_hashes" in hints, "AgentState must have a file_hashes field"
+
+
+# ---------------------------------------------------------------------------
+# Tests for REMOVE sentinel (issue #6)
+# ---------------------------------------------------------------------------
+
+
+class TestMergeFileHashesRemoval:
+    def test_remove_sentinel_drops_key(self) -> None:
+        """Returning REMOVE for a key should remove it from the merged result."""
+        from sosa.schemas.AgentState import merge_file_hashes, REMOVE
+
+        existing = {"a.txt": "hash1", "b.txt": "hash2", "c.txt": "hash3"}
+        update = {"b.txt": REMOVE}
+        result = merge_file_hashes(existing, update)
+        assert "b.txt" not in result
+        assert result["a.txt"] == "hash1"
+        assert result["c.txt"] == "hash3"
+
+    def test_remove_sentinel_absent_key_is_noop(self) -> None:
+        """REMOVE on a key that does not exist in existing should not raise."""
+        from sosa.schemas.AgentState import merge_file_hashes, REMOVE
+
+        existing = {"a.txt": "hash1"}
+        update = {"nonexistent.txt": REMOVE}
+        result = merge_file_hashes(existing, update)
+        assert result == {"a.txt": "hash1"}
+        assert "nonexistent.txt" not in result
+
+    def test_remove_mixed_with_add(self) -> None:
+        """A single update can both remove a key and add/overwrite another."""
+        from sosa.schemas.AgentState import merge_file_hashes, REMOVE
+
+        existing = {"a.txt": "hash1", "b.txt": "hash2"}
+        update = {"b.txt": REMOVE, "c.txt": "hash3"}
+        result = merge_file_hashes(existing, update)
+        assert result == {"a.txt": "hash1", "c.txt": "hash3"}
+
+    def test_merge_without_removal_unchanged(self) -> None:
+        """Normal merge behavior (no REMOVE) must be unaffected."""
+        from sosa.schemas.AgentState import merge_file_hashes
+
+        existing = {"a.txt": "hash1", "b.txt": "hash2"}
+        update = {"b.txt": "hash2_new", "c.txt": "hash3"}
+        result = merge_file_hashes(existing, update)
+        assert result == {"a.txt": "hash1", "b.txt": "hash2_new", "c.txt": "hash3"}
+
+    def test_remove_sentinel_is_exported(self) -> None:
+        """REMOVE must be importable from sosa.schemas.AgentState."""
+        from sosa.schemas import AgentState as module
+        assert hasattr(module, "REMOVE"), "REMOVE sentinel must be exported from AgentState module"
