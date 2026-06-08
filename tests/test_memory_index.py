@@ -484,3 +484,241 @@ class TestAgentStateMemoryIndexField:
 
         hints = typing.get_type_hints(AgentState, include_extras=True)
         assert "memory_index" in hints, "AgentState must have a memory_index field"
+
+
+# ---------------------------------------------------------------------------
+# Issue #17: Hash-gated index regen + memory files ride staleness
+# ---------------------------------------------------------------------------
+
+
+class TestHashGatedRegen:
+    """MEMORY.md is only written when memory files changed/added/deleted."""
+
+    def test_unchanged_memory_set_does_not_rewrite_memory_md(self, tmp_path: Path) -> None:
+        """When no memory file has changed, init must NOT rewrite MEMORY.md."""
+        from sosa.graph.nodes.init import init
+        from sosa.tools.hashing import hash_file
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        mem_path = _write_memory_file(soul_path, "alice", "user", "Alice")
+        # First call: no hashes stored yet — regen expected
+        state = _make_init_state(soul_path, workspace)
+        result1 = init(state)
+        memory_md = soul_path / "MEMORY.md"
+        mtime1 = memory_md.stat().st_mtime_ns
+
+        # Second call: pass the file_hashes returned by the first call — nothing changed
+        stored_hashes = result1.get("file_hashes", {})
+        state2 = {**_make_init_state(soul_path, workspace), "file_hashes": stored_hashes}
+        init(state2)
+        mtime2 = memory_md.stat().st_mtime_ns
+
+        assert mtime1 == mtime2, (
+            "MEMORY.md must not be rewritten when no memory file changed"
+        )
+
+    def test_new_memory_file_triggers_regen(self, tmp_path: Path) -> None:
+        """Adding a new memory file triggers a MEMORY.md rebuild."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        _write_memory_file(soul_path, "alice", "user", "Alice")
+
+        state = _make_init_state(soul_path, workspace)
+        result1 = init(state)
+        memory_md = soul_path / "MEMORY.md"
+        mtime1 = memory_md.stat().st_mtime_ns
+
+        # Add new file, pass stale hashes (only alice recorded)
+        _write_memory_file(soul_path, "bob", "user", "Bob")
+        stored_hashes = result1.get("file_hashes", {})
+        state2 = {**_make_init_state(soul_path, workspace), "file_hashes": stored_hashes}
+        result2 = init(state2)
+        mtime2 = memory_md.stat().st_mtime_ns
+
+        assert mtime1 != mtime2, "MEMORY.md must be rewritten when a new memory file appears"
+        assert result2.get("memory_index") is not None
+        assert "bob" in result2["memory_index"]
+
+    def test_changed_memory_file_triggers_regen(self, tmp_path: Path) -> None:
+        """Editing a memory file triggers a MEMORY.md rebuild."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        mem_path = _write_memory_file(soul_path, "alice", "user", "Alice original")
+
+        state = _make_init_state(soul_path, workspace)
+        result1 = init(state)
+        memory_md = soul_path / "MEMORY.md"
+        mtime1 = memory_md.stat().st_mtime_ns
+
+        # Modify the file, pass old hashes
+        mem_path.write_text("---\ndescription: Alice changed\ntype: user\n---\n")
+        stored_hashes = result1.get("file_hashes", {})
+        state2 = {**_make_init_state(soul_path, workspace), "file_hashes": stored_hashes}
+        init(state2)
+        mtime2 = memory_md.stat().st_mtime_ns
+
+        assert mtime1 != mtime2, "MEMORY.md must be rewritten when a memory file content changes"
+
+    def test_deleted_memory_file_triggers_regen(self, tmp_path: Path) -> None:
+        """Deleting a memory file triggers a MEMORY.md rebuild."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        mem_path = _write_memory_file(soul_path, "alice", "user", "Alice")
+        _write_memory_file(soul_path, "bob", "user", "Bob")
+
+        state = _make_init_state(soul_path, workspace)
+        result1 = init(state)
+        memory_md = soul_path / "MEMORY.md"
+        mtime1 = memory_md.stat().st_mtime_ns
+
+        # Delete one file, pass old hashes
+        mem_path.unlink()
+        stored_hashes = result1.get("file_hashes", {})
+        state2 = {**_make_init_state(soul_path, workspace), "file_hashes": stored_hashes}
+        result2 = init(state2)
+        mtime2 = memory_md.stat().st_mtime_ns
+
+        assert mtime1 != mtime2, "MEMORY.md must be rewritten when a memory file is deleted"
+
+
+class TestInitRegistersMemoryFileHashes:
+    """init() must register every memory file in file_hashes."""
+
+    def test_init_returns_file_hashes_for_memory_files(self, tmp_path: Path) -> None:
+        """init returns file_hashes containing each memory/*.md path."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        p1 = _write_memory_file(soul_path, "alice", "user", "Alice")
+        p2 = _write_memory_file(soul_path, "bob", "user", "Bob")
+
+        state = _make_init_state(soul_path, workspace)
+        result = init(state)
+
+        hashes = result.get("file_hashes", {})
+        assert str(p1) in hashes, f"Expected {p1} in file_hashes"
+        assert str(p2) in hashes, f"Expected {p2} in file_hashes"
+        # Values must be non-empty SHA-256 hex strings
+        assert len(hashes[str(p1)]) == 64
+        assert len(hashes[str(p2)]) == 64
+
+    def test_init_uses_remove_sentinel_for_deleted_memory_file(self, tmp_path: Path) -> None:
+        """init returns REMOVE sentinel for a memory file that was deleted externally."""
+        from sosa.graph.nodes.init import init
+        from sosa.schemas.AgentState import REMOVE
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        mem_path = _write_memory_file(soul_path, "alice", "user", "Alice")
+        _write_memory_file(soul_path, "bob", "user", "Bob")
+
+        state = _make_init_state(soul_path, workspace)
+        result1 = init(state)
+
+        # Delete alice, pass old hashes
+        mem_path.unlink()
+        stored_hashes = result1.get("file_hashes", {})
+        state2 = {**_make_init_state(soul_path, workspace), "file_hashes": stored_hashes}
+        result2 = init(state2)
+
+        hashes2 = result2.get("file_hashes", {})
+        assert hashes2.get(str(mem_path)) is REMOVE, (
+            "Deleted memory file must have REMOVE sentinel in file_hashes update"
+        )
+
+    def test_refreshed_hashes_prevent_staleness_on_next_turn(self, tmp_path: Path) -> None:
+        """After init regenerates, the returned hashes prevent the staleness node
+        from re-flagging the just-written memory files on the same turn."""
+        from sosa.graph.nodes.init import init
+        from sosa.graph.nodes.staleness import staleness
+        from sosa.schemas.AgentState import merge_file_hashes
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        _write_memory_file(soul_path, "alice", "user", "Alice")
+
+        # Turn 1: init with no prior hashes
+        state1 = _make_init_state(soul_path, workspace)
+        result1 = init(state1)
+        hashes_after_init = result1.get("file_hashes", {})
+
+        # Simulate graph: merge the returned hashes into state, then run staleness
+        merged = merge_file_hashes({}, hashes_after_init)
+        staleness_state = {"file_hashes": merged, "messages": []}
+        staleness_result = staleness(staleness_state)
+
+        # No memory files should be flagged as changed — hashes were refreshed by init
+        sys_msgs = [
+            m for m in staleness_result.get("messages", [])
+            if hasattr(m, "content") and "changed" in m.content.lower()
+        ]
+        assert not sys_msgs, (
+            "Staleness node must not re-flag memory files written by init in the same turn. "
+            f"Got messages: {sys_msgs}"
+        )
+
+
+class TestMemoryFilesRideStaleness:
+    """Memory files registered in file_hashes are surfaced by the staleness node."""
+
+    def test_externally_edited_memory_file_triggers_staleness(self, tmp_path: Path) -> None:
+        """An external edit to a memory file is surfaced by the staleness node."""
+        from sosa.graph.nodes.init import init
+        from sosa.graph.nodes.staleness import staleness
+        from sosa.schemas.AgentState import merge_file_hashes
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        mem_path = _write_memory_file(soul_path, "alice", "user", "Alice")
+
+        # Turn 1: init registers memory file hash
+        state1 = _make_init_state(soul_path, workspace)
+        result1 = init(state1)
+        hashes = merge_file_hashes({}, result1.get("file_hashes", {}))
+
+        # External edit to memory file (between turns)
+        mem_path.write_text("---\ndescription: Alice updated externally\ntype: user\n---\n")
+
+        # Run staleness node with the stored hashes
+        staleness_state = {"file_hashes": hashes, "messages": []}
+        staleness_result = staleness(staleness_state)
+
+        msgs = staleness_result.get("messages", [])
+        assert msgs, "Staleness node must surface an externally-edited memory file"
+        combined = " ".join(m.content for m in msgs if hasattr(m, "content"))
+        assert str(mem_path) in combined or mem_path.name in combined, (
+            f"Staleness message must name the changed memory file. Got: {combined}"
+        )
+        assert "changed" in combined.lower()

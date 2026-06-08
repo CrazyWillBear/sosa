@@ -42,7 +42,7 @@ Sosa is a LangGraph-based ReAct agent. The core class is `sosa/Sosa.py`, which c
 START → init → cleanup → compacter → staleness → react → tool_node → (react | END)
 ```
 
-- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from `soul_memory_path` (creating it from `sosa/prompts/Soul.md` if absent). Builds `MEMORY.md` at `soul_memory_path/MEMORY.md` from per-fact files in `soul_memory_path/memory/` (each with YAML frontmatter). Also resolves and reads project docs (`AGENTS.md` preferred, `CLAUDE.md` fallback) from both `soul_memory_path` (global scope) and `workspace_path` (workspace scope), injecting them fresh each turn.
+- **init** (`sosa/graph/nodes/init.py`): Reads `soul.md` from `soul_memory_path` (creating it from `sosa/prompts/Soul.md` if absent). Hash-gates `MEMORY.md` regeneration: rebuilds the index only when a memory file was added, changed, or deleted (compared against stored `file_hashes`). Registers every `memory/*.md` file in `file_hashes` so the staleness node surfaces external edits. Also resolves and reads project docs (`AGENTS.md` preferred, `CLAUDE.md` fallback) from both `soul_memory_path` (global scope) and `workspace_path` (workspace scope), injecting them fresh each turn.
 - **cleanup** (`sosa/graph/nodes/cleanup.py`): Stale `read_file` tool results are replaced with a placeholder each turn so they don't bloat context.
 - **compacter** (`sosa/graph/nodes/compacter.py`): When message history exceeds ~70k tokens, summarizes all but the last 10 messages using the base model and replaces them with a `SystemMessage` summary.
 - **staleness** (`sosa/graph/nodes/staleness.py`): Compares each tracked file's current on-disk hash against its stored baseline. Injects a single `SystemMessage` naming any changed or deleted files. Refreshes baselines so each change is reported only once.
@@ -66,8 +66,8 @@ By default, every agent includes: `run_bash_command`, `write_file`, `edit_file`,
 Shared memory lives in `soul_memory_path/` (default `~/sosa/`):
 
 - `soul.md` — personality/behavior config, editable to change agent character
-- `memory/` — directory of per-fact markdown files; each file opens with YAML frontmatter (`description`, `type`) followed by an optional body. The init node builds `MEMORY.md` from these files each turn and injects it into context.
-- `MEMORY.md` — auto-generated index; do not edit by hand (regenerated every turn from `memory/`)
+- `memory/` — directory of per-fact markdown files; each file opens with YAML frontmatter (`description`, `type`) followed by an optional body. The init node hash-gates `MEMORY.md` regeneration (rebuilt only when files change) and registers each file in `file_hashes` so external edits are surfaced by the staleness node.
+- `MEMORY.md` — auto-generated index; do not edit by hand (rebuilt from `memory/` when files change)
 
 Workspace-specific context is stored in the workspace project doc (`AGENTS.md` or `CLAUDE.md` in `workspace_path/`), which is auto-injected each turn. The agent creates or edits it to persist workspace details.
 
