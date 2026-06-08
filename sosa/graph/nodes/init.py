@@ -3,7 +3,11 @@ from pathlib import Path
 
 from langchain_core.messages import SystemMessage
 
-from sosa.graph.nodes.memory_index import MalformedMemoryFileError, build_memory_index
+from sosa.graph.nodes.memory_index import (
+    MalformedMemoryFileError,
+    build_memory_index,
+    get_malformed_memory_files,
+)
 from sosa.graph.nodes.project_docs import resolve_project_doc
 from sosa.schemas.AgentState import AgentState, REMOVE
 from sosa.tools.hashing import hash_file
@@ -39,6 +43,12 @@ def _sync_memory_index(
     malformed.  This preserves staleness tracking for the good files while the
     broken file persists.
 
+    ALL malformed files' hashes are excluded from ``hash_updates`` so that none
+    of them can ever become a stored baseline while broken.  This guarantees
+    ``changed=True`` on every turn while ANY file remains malformed, causing
+    ``build_memory_index`` to run every turn so the next offender surfaces
+    immediately rather than being suppressed.
+
     Returns:
         (memory_index, hash_updates, error) where:
         - *memory_index* is the rebuilt index string (or None when no files
@@ -49,6 +59,7 @@ def _sync_memory_index(
           entries for existing files, ``REMOVE`` sentinels for deleted files.
           Only entries that differ from ``stored_hashes`` are included.
           Always populated for all memory files — even on the error path.
+          Malformed files are never included regardless of the ``changed`` flag.
         - *error* is the ``MalformedMemoryFileError`` if any file had invalid
           frontmatter, or None on success.
     """
@@ -66,13 +77,25 @@ def _sync_memory_index(
         if k.startswith(str(memory_dir) + "/") or k.startswith(str(memory_dir) + "\\")
     }
 
+    # Identify ALL currently-malformed files up front, independent of the
+    # hash short-circuit.  Their hashes must be excluded from hash_updates so
+    # they are never baselined while broken, which keeps changed=True on every
+    # subsequent turn until ALL malformed files are fixed.
+    malformed_errors = get_malformed_memory_files(soul_memory_path)
+    malformed_keys = {str(exc.offending_path) for exc in malformed_errors}
+
     # Compute hash updates: new/changed files and deleted files.
     # Done BEFORE calling build_memory_index so the updates are available even
     # if the build raises MalformedMemoryFileError for a broken sibling.
+    # Malformed files are excluded so their hashes are never stored as baselines.
     hash_updates: dict[str, object] = {}
     changed = False
 
     for path_str, current_hash in current_files.items():
+        if path_str in malformed_keys:
+            # Never register a baseline for a malformed file.  This ensures
+            # changed=True on the next turn even if no other file changes.
+            continue
         if stored_hashes.get(path_str) != current_hash:
             hash_updates[path_str] = current_hash
             changed = True
@@ -82,8 +105,14 @@ def _sync_memory_index(
             hash_updates[path_str] = REMOVE
             changed = True
 
+    # If any files are malformed, force changed=True so build_memory_index runs
+    # every turn while they remain broken.  This guarantees the error re-emits
+    # and the next still-broken file surfaces immediately once earlier ones are fixed.
+    if malformed_keys:
+        changed = True
+
     if not changed:
-        # Nothing changed — leave MEMORY.md as-is, emit only no-op updates
+        # Nothing changed and no malformed files — leave MEMORY.md as-is
         return None, hash_updates, None
 
     # Rebuild the index (writes MEMORY.md when files exist).
@@ -91,13 +120,9 @@ def _sync_memory_index(
     try:
         memory_index = build_memory_index(soul_memory_path)
     except MalformedMemoryFileError as exc:
-        # Exclude the offending file's hash from hash_updates so its hash is
-        # never registered as a baseline.  This keeps changed=True on every
-        # subsequent turn while the file remains broken — the error re-emits
-        # each turn rather than self-suppressing after the first detection.
+        # hash_updates already excludes ALL malformed files' hashes (done above),
+        # so the offending file is already absent — nothing extra to pop here.
         # Good-sibling hashes (already in hash_updates) are preserved intact.
-        offending_key = str(exc.offending_path)
-        hash_updates.pop(offending_key, None)
         return None, hash_updates, exc
 
     return memory_index, hash_updates, None

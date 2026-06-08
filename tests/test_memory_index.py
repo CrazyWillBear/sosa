@@ -1300,3 +1300,237 @@ class TestMalformedErrorClearsWhenFixed:
             "After the malformed file is fixed, init must NOT emit a [Memory index error] "
             f"message. Got: {[m.content[:80] for m in error_msgs]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #24: multiple malformed files — second file must not be suppressed
+# ---------------------------------------------------------------------------
+
+
+class TestMultipleMalformedFilesNoSuppression:
+    """Regression for #24: when >1 memory file is malformed, fixing the first must
+    not suppress the error for the remaining broken files.
+
+    Root cause: _sync_memory_index (pre-fix) only popped the *named* offender's hash,
+    leaving all other malformed files' hashes baselined.  On a steady-state turn
+    (nothing else changed) the second file's hash matched its stored baseline, so
+    changed=False and build_memory_index was never called → error suppressed.
+
+    IMPORTANT: tests simulate proper state accumulation using merge_file_hashes
+    (matching how Sosa._file_hashes is maintained across turns).
+    """
+
+    def _make_state(
+        self,
+        soul_path: Path,
+        workspace: Path,
+        messages: list | None = None,
+        file_hashes: dict | None = None,
+    ) -> dict:
+        state: dict = {"soul_memory_path": soul_path, "workspace_path": workspace}
+        if messages is not None:
+            state["messages"] = messages
+        if file_hashes is not None:
+            state["file_hashes"] = file_hashes
+        return state
+
+    def _error_msgs(self, result: dict) -> list:
+        return [
+            m for m in (result.get("messages") or [])
+            if isinstance(m, SystemMessage) and "Memory index error" in m.content
+        ]
+
+    def _next_hashes(self, accumulated: dict, result: dict) -> dict:
+        """Simulate Sosa._file_hashes accumulation: merge delta into accumulated."""
+        from sosa.schemas.AgentState import merge_file_hashes
+        delta = result.get("file_hashes", {})
+        return merge_file_hashes(accumulated, delta)
+
+    # ------------------------------------------------------------------
+    # Two-malformed-file tests
+    # ------------------------------------------------------------------
+
+    def test_two_malformed_files_turn1_emits_error(self, tmp_path: Path) -> None:
+        """Turn 1 with aaa.md and zzz.md both malformed must produce an error."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        mem_dir = soul_path / "memory"
+        mem_dir.mkdir()
+        (mem_dir / "aaa.md").write_text("no frontmatter\n")
+        (mem_dir / "zzz.md").write_text("no frontmatter\n")
+
+        state = self._make_state(soul_path, workspace)
+        result = init(state)
+
+        assert self._error_msgs(result), "Turn 1 must emit an error when two files are malformed"
+
+    def test_second_malformed_file_resurfaces_after_first_fixed(self, tmp_path: Path) -> None:
+        """After fixing aaa.md, the next steady-state turn must still name zzz.md.
+
+        Uses merge_file_hashes to properly simulate Sosa._file_hashes accumulation,
+        which is the exact scenario where the #24 bug manifests.
+        """
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        mem_dir = soul_path / "memory"
+        mem_dir.mkdir()
+        aaa = mem_dir / "aaa.md"
+        zzz = mem_dir / "zzz.md"
+        aaa.write_text("no frontmatter\n")
+        zzz.write_text("no frontmatter\n")
+
+        # Turn 1: both broken; accumulated hashes start empty
+        accumulated: dict = {}
+        state1 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result1 = init(state1)
+        assert self._error_msgs(result1), "Precondition: turn 1 must emit error"
+        accumulated = self._next_hashes(accumulated, result1)
+
+        # Fix aaa.md (this causes changed=True because aaa's hash differs from baseline)
+        aaa.write_text("---\ndescription: AAA fixed\ntype: user\n---\n")
+
+        # Turn 2: aaa fixed, zzz still broken
+        state2 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result2 = init(state2)
+        assert self._error_msgs(result2), (
+            "Turn 2: after fixing aaa.md, zzz.md is still malformed — error must still be emitted"
+        )
+        combined2 = " ".join(m.content for m in self._error_msgs(result2))
+        assert "zzz.md" in combined2, (
+            f"Turn 2 error must name zzz.md. Got: {combined2!r}"
+        )
+        accumulated = self._next_hashes(accumulated, result2)
+
+        # Turn 3 (steady-state — nothing changes between turn 2 and 3)
+        state3 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result3 = init(state3)
+        assert self._error_msgs(result3), (
+            "Turn 3 (steady-state, zzz.md still broken): error must re-emit — "
+            "this is the core regression for #24."
+        )
+        combined3 = " ".join(m.content for m in self._error_msgs(result3))
+        assert "zzz.md" in combined3, (
+            f"Turn 3 error must name zzz.md. Got: {combined3!r}"
+        )
+
+    def test_second_file_error_persists_across_multiple_steady_state_turns(self, tmp_path: Path) -> None:
+        """Error for zzz.md must re-emit on turn 4+ (any number of steady-state turns).
+
+        Uses merge_file_hashes to properly simulate Sosa._file_hashes accumulation.
+        """
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        mem_dir = soul_path / "memory"
+        mem_dir.mkdir()
+        aaa = mem_dir / "aaa.md"
+        zzz = mem_dir / "zzz.md"
+        aaa.write_text("no frontmatter\n")
+        zzz.write_text("no frontmatter\n")
+
+        # Turn 1
+        accumulated: dict = {}
+        state1 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result1 = init(state1)
+        accumulated = self._next_hashes(accumulated, result1)
+
+        # Fix aaa.md
+        aaa.write_text("---\ndescription: AAA fixed\ntype: user\n---\n")
+
+        # Turns 2, 3, 4: zzz still broken, no other changes
+        for turn in range(2, 5):
+            state = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+            result = init(state)
+            error_msgs = self._error_msgs(result)
+            assert error_msgs, (
+                f"Turn {turn}: zzz.md still malformed, error must re-emit "
+                f"(steady-state suppression regression #24)"
+            )
+            accumulated = self._next_hashes(accumulated, result)
+
+    # ------------------------------------------------------------------
+    # Three-malformed-file tests (proves fix is general, not just 2-file)
+    # ------------------------------------------------------------------
+
+    def test_three_malformed_files_fix_one_at_a_time(self, tmp_path: Path) -> None:
+        """With aaa.md, mmm.md, zzz.md all malformed, fixing them one at a time
+        must keep the error alive until ALL are fixed.
+
+        Uses merge_file_hashes to properly simulate Sosa._file_hashes accumulation.
+        """
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        mem_dir = soul_path / "memory"
+        mem_dir.mkdir()
+        aaa = mem_dir / "aaa.md"
+        mmm = mem_dir / "mmm.md"
+        zzz = mem_dir / "zzz.md"
+        for f in (aaa, mmm, zzz):
+            f.write_text("no frontmatter\n")
+
+        accumulated: dict = {}
+
+        # Turn 1: all three broken
+        state1 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result1 = init(state1)
+        assert self._error_msgs(result1), "Turn 1: all three broken, must emit error"
+        accumulated = self._next_hashes(accumulated, result1)
+
+        # Fix aaa.md
+        aaa.write_text("---\ndescription: AAA fixed\ntype: user\n---\n")
+
+        # Turn 2: aaa fixed, mmm and zzz still broken
+        state2 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result2 = init(state2)
+        assert self._error_msgs(result2), "Turn 2: mmm+zzz still broken, error must persist"
+        accumulated = self._next_hashes(accumulated, result2)
+
+        # Steady-state turn 3 (nothing changes)
+        state3 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result3 = init(state3)
+        assert self._error_msgs(result3), "Turn 3 (steady-state): mmm+zzz still broken, error must persist"
+        accumulated = self._next_hashes(accumulated, result3)
+
+        # Fix mmm.md
+        mmm.write_text("---\ndescription: MMM fixed\ntype: user\n---\n")
+
+        # Turn 4: mmm fixed, zzz still broken
+        state4 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result4 = init(state4)
+        assert self._error_msgs(result4), "Turn 4: zzz still broken, error must persist"
+        combined4 = " ".join(m.content for m in self._error_msgs(result4))
+        assert "zzz.md" in combined4, f"Turn 4 error must name zzz.md. Got: {combined4!r}"
+        accumulated = self._next_hashes(accumulated, result4)
+
+        # Steady-state turn 5 (only zzz broken)
+        state5 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result5 = init(state5)
+        assert self._error_msgs(result5), "Turn 5 (steady-state): zzz still broken, error must persist"
+        combined5 = " ".join(m.content for m in self._error_msgs(result5))
+        assert "zzz.md" in combined5, f"Turn 5 error must name zzz.md. Got: {combined5!r}"
+        accumulated = self._next_hashes(accumulated, result5)
+
+        # Fix zzz.md
+        zzz.write_text("---\ndescription: ZZZ fixed\ntype: user\n---\n")
+
+        # Turn 6: all fixed — no error
+        state6 = self._make_state(soul_path, workspace, file_hashes=dict(accumulated))
+        result6 = init(state6)
+        assert not self._error_msgs(result6), (
+            "Turn 6: all files fixed, no error must be emitted"
+        )

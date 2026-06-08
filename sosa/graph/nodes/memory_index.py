@@ -77,6 +77,28 @@ def _validate_frontmatter(fields: dict[str, str], path: Path) -> None:
         )
 
 
+def get_malformed_memory_files(soul_memory_path: Path) -> list["MalformedMemoryFileError"]:
+    """Return one :exc:`MalformedMemoryFileError` per malformed file in *soul_memory_path*/memory/.
+
+    Scans every ``memory/*.md`` file and validates its frontmatter without raising.
+    Returns an empty list when no files are malformed (or the directory is absent).
+    This lets callers enumerate ALL broken files at once rather than catching one
+    exception at a time from :func:`build_memory_index`.
+    """
+    memory_dir = soul_memory_path / "memory"
+    if not memory_dir.exists():
+        return []
+
+    errors: list[MalformedMemoryFileError] = []
+    for path in sorted(memory_dir.glob("*.md")):
+        fm = _parse_frontmatter(path.read_text())
+        try:
+            _validate_frontmatter(fm, path)
+        except MalformedMemoryFileError as exc:
+            errors.append(exc)
+    return errors
+
+
 def build_memory_index(soul_memory_path: Path) -> str | None:
     """Scan *soul_memory_path*/memory/ and build a MEMORY.md index.
 
