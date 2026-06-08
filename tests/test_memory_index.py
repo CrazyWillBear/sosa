@@ -1077,3 +1077,226 @@ class TestMalformedFileNoDuplicateErrorAccumulation:
             f"Expected exactly 1 error message after two turns with the same malformed file, "
             f"got {len(error_msgs)}. Messages: {[m.content[:80] for m in error_msgs]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #23: malformed-memory error self-suppresses / lingers bugs
+# ---------------------------------------------------------------------------
+
+
+class TestMalformedErrorReEmittedEveryTurn:
+    """AC: init re-emits the error SystemMessage on EVERY turn the file remains broken.
+
+    Regression for #23 primary bug: _sync_memory_index was registering the malformed
+    file's hash in hash_updates, so on turn 2 the hash matched stored_hashes and
+    changed=False, causing the error to be suppressed.
+    """
+
+    def _make_state(
+        self,
+        soul_path: Path,
+        workspace: Path,
+        messages: list | None = None,
+        file_hashes: dict | None = None,
+    ) -> dict:
+        state: dict = {"soul_memory_path": soul_path, "workspace_path": workspace}
+        if messages is not None:
+            state["messages"] = messages
+        if file_hashes is not None:
+            state["file_hashes"] = file_hashes
+        return state
+
+    def test_error_re_emitted_on_turn_2(self, tmp_path: Path) -> None:
+        """Turn 2 with unchanged malformed file must still return an error SystemMessage."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (soul_path / "memory").mkdir()
+        broken = soul_path / "memory" / "broken.md"
+        broken.write_text("no frontmatter here\n")
+
+        # Turn 1: establishes stored hashes
+        state1 = self._make_state(soul_path, workspace)
+        result1 = init(state1)
+        assert any(
+            isinstance(m, SystemMessage) and "Memory index error" in m.content
+            for m in (result1.get("messages") or [])
+        ), "Turn 1 must emit an error message"
+
+        # Turn 2: same malformed file, hashes from turn 1 stored
+        state2 = self._make_state(
+            soul_path, workspace,
+            file_hashes=result1.get("file_hashes", {}),
+        )
+        result2 = init(state2)
+        error_msgs = [
+            m for m in (result2.get("messages") or [])
+            if isinstance(m, SystemMessage) and "Memory index error" in m.content
+        ]
+        assert error_msgs, (
+            "Turn 2 must still emit an error SystemMessage when the malformed file "
+            "has not been fixed (regression: hash match caused changed=False)."
+        )
+
+    def test_error_re_emitted_on_turn_3(self, tmp_path: Path) -> None:
+        """Three consecutive turns with the same broken file each emit the error."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (soul_path / "memory").mkdir()
+        broken = soul_path / "memory" / "broken.md"
+        broken.write_text("no frontmatter here\n")
+
+        hashes: dict = {}
+        for turn in range(1, 4):
+            state = self._make_state(soul_path, workspace, file_hashes=hashes)
+            result = init(state)
+            error_msgs = [
+                m for m in (result.get("messages") or [])
+                if isinstance(m, SystemMessage) and "Memory index error" in m.content
+            ]
+            assert error_msgs, (
+                f"Turn {turn} must emit an error SystemMessage while malformed file persists."
+            )
+            hashes = result.get("file_hashes", {})
+
+
+class TestMalformedErrorReappearsAfterRemoveMessage:
+    """AC: after the error message is removed from history (e.g. by compacter), the
+    NEXT init turn with the file still broken re-adds the error notice.
+
+    Regression for #23 secondary-adjacent bug: because the error was only emitted once
+    (on first detection), removing it meant it was permanently gone.
+    """
+
+    def _make_state(
+        self,
+        soul_path: Path,
+        workspace: Path,
+        messages: list | None = None,
+        file_hashes: dict | None = None,
+    ) -> dict:
+        state: dict = {"soul_memory_path": soul_path, "workspace_path": workspace}
+        if messages is not None:
+            state["messages"] = messages
+        if file_hashes is not None:
+            state["file_hashes"] = file_hashes
+        return state
+
+    def test_error_readded_after_remove_message(self, tmp_path: Path) -> None:
+        """After the error message is removed from history, init re-emits it next turn."""
+        from langchain_core.messages import RemoveMessage
+        from langgraph.graph import add_messages
+
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (soul_path / "memory").mkdir()
+        broken = soul_path / "memory" / "broken.md"
+        broken.write_text("no frontmatter here\n")
+
+        # Turn 1: get the error message
+        state1 = self._make_state(soul_path, workspace)
+        result1 = init(state1)
+        history: list = []
+        history = add_messages(history, result1.get("messages") or [])
+        error_msgs_t1 = [
+            m for m in history if isinstance(m, SystemMessage) and "Memory index error" in m.content
+        ]
+        assert error_msgs_t1, "Precondition: turn 1 must produce an error message"
+        error_id = error_msgs_t1[0].id
+
+        # Simulate compacter removing the error message from history
+        history = add_messages(history, [RemoveMessage(id=error_id)])
+        assert not any(
+            isinstance(m, SystemMessage) and "Memory index error" in m.content
+            for m in history
+        ), "Precondition: error message must be removed from history"
+
+        # Turn 2: same malformed file, hashes from turn 1 — error must come back
+        state2 = self._make_state(
+            soul_path, workspace,
+            messages=list(history),
+            file_hashes=result1.get("file_hashes", {}),
+        )
+        result2 = init(state2)
+        history = add_messages(history, result2.get("messages") or [])
+        error_msgs_t2 = [
+            m for m in history if isinstance(m, SystemMessage) and "Memory index error" in m.content
+        ]
+        assert error_msgs_t2, (
+            "After the error message was removed from history, the next init turn "
+            "must re-emit the error (file is still malformed)."
+        )
+
+
+class TestMalformedErrorClearsWhenFixed:
+    """AC: when the malformed file is fixed, no error message is emitted on the next turn.
+
+    Regression for #23 stale-error-after-fix: old error message's id was never
+    re-emitted and no RemoveMessage was sent, so the notice lingered in history.
+    When the file is fixed the error must not appear in the NEXT turn's output.
+    """
+
+    def _make_state(
+        self,
+        soul_path: Path,
+        workspace: Path,
+        messages: list | None = None,
+        file_hashes: dict | None = None,
+    ) -> dict:
+        state: dict = {"soul_memory_path": soul_path, "workspace_path": workspace}
+        if messages is not None:
+            state["messages"] = messages
+        if file_hashes is not None:
+            state["file_hashes"] = file_hashes
+        return state
+
+    def test_no_error_emitted_after_fix(self, tmp_path: Path) -> None:
+        """After fixing the malformed file, init must NOT emit a [Memory index error] message."""
+        from sosa.graph.nodes.init import init
+
+        soul_path = tmp_path / "soul"
+        soul_path.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (soul_path / "memory").mkdir()
+        broken = soul_path / "memory" / "broken.md"
+        broken.write_text("no frontmatter here\n")
+
+        # Turn 1: malformed file
+        state1 = self._make_state(soul_path, workspace)
+        result1 = init(state1)
+        assert any(
+            isinstance(m, SystemMessage) and "Memory index error" in m.content
+            for m in (result1.get("messages") or [])
+        ), "Precondition: turn 1 must emit an error message"
+
+        # Fix the file
+        broken.write_text(
+            "---\ndescription: Now well-formed\ntype: user\n---\n\nBody.\n"
+        )
+
+        # Turn 2: file is now well-formed — no error message
+        state2 = self._make_state(
+            soul_path, workspace,
+            file_hashes=result1.get("file_hashes", {}),
+        )
+        result2 = init(state2)
+        error_msgs = [
+            m for m in (result2.get("messages") or [])
+            if isinstance(m, SystemMessage) and "Memory index error" in m.content
+        ]
+        assert not error_msgs, (
+            "After the malformed file is fixed, init must NOT emit a [Memory index error] "
+            f"message. Got: {[m.content[:80] for m in error_msgs]}"
+        )

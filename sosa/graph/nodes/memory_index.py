@@ -24,8 +24,15 @@ class MalformedMemoryFileError(ValueError):
     """Raised when a memory file has missing or incomplete YAML frontmatter.
 
     The error message always names the offending file so the agent can locate
-    and fix it.
+    and fix it.  ``offending_path`` carries the same path as a ``Path`` object
+    so callers can exclude it from hash-tracking without parsing the message.
     """
+
+    offending_path: "Path"
+
+    def __init__(self, message: str, path: "Path") -> None:
+        super().__init__(message)
+        self.offending_path = path
 
 
 def _parse_frontmatter(text: str) -> dict[str, str]:
@@ -58,13 +65,15 @@ def _validate_frontmatter(fields: dict[str, str], path: Path) -> None:
     if not fields:
         raise MalformedMemoryFileError(
             f"Memory file '{path}' has no frontmatter (expected a '---' block "
-            f"with 'description' and 'type' fields)."
+            f"with 'description' and 'type' fields).",
+            path=path,
         )
     missing = [f for f in _REQUIRED_FIELDS if not fields.get(f)]
     if missing:
         raise MalformedMemoryFileError(
             f"Memory file '{path}' is missing required frontmatter "
-            f"field(s): {', '.join(missing)}."
+            f"field(s): {', '.join(missing)}.",
+            path=path,
         )
 
 

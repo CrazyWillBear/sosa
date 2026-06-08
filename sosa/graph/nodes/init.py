@@ -91,6 +91,13 @@ def _sync_memory_index(
     try:
         memory_index = build_memory_index(soul_memory_path)
     except MalformedMemoryFileError as exc:
+        # Exclude the offending file's hash from hash_updates so its hash is
+        # never registered as a baseline.  This keeps changed=True on every
+        # subsequent turn while the file remains broken — the error re-emits
+        # each turn rather than self-suppressing after the first detection.
+        # Good-sibling hashes (already in hash_updates) are preserved intact.
+        offending_key = str(exc.offending_path)
+        hash_updates.pop(offending_key, None)
         return None, hash_updates, exc
 
     return memory_index, hash_updates, None
