@@ -13,7 +13,7 @@ from sosa.graph.nodes.compacter import compacter
 from sosa.graph.nodes.init import init
 from sosa.graph.nodes.react import react
 from sosa.graph.nodes.staleness import staleness
-from sosa.schemas.AgentState import AgentState
+from sosa.schemas.AgentState import AgentState, merge_file_hashes
 from sosa.tools.Bash import run_bash_command
 from sosa.tools.FileOps import write_file, edit_file, read_file
 
@@ -61,6 +61,10 @@ class Sosa:
         self.mcp_servers = mcp_servers or {}
         self._mcp_client = None
         self.graph = None
+        # Per-session file hash store.  Persists across run() calls within the
+        # same Sosa instance (same session).  A new instance starts empty,
+        # satisfying the "resets each new session" requirement.
+        self._file_hashes: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Async context manager (required when mcp_servers is set)
@@ -142,7 +146,13 @@ class Sosa:
         self.graph = graph.compile()
 
     async def run(self, messages: List[AnyMessage]):
-        """Async generator that streams new messages as the agent works through its turn."""
+        """Async generator that streams new messages as the agent works through its turn.
+
+        ``file_hashes`` is seeded from the instance-level store so baselines
+        recorded by ``read_file`` in previous turns survive into this turn's
+        staleness check.  After the turn completes the store is updated with
+        whatever the graph accumulated, so the next call picks them up.
+        """
 
         if self.graph is None:
             self.build()
@@ -159,8 +169,12 @@ class Sosa:
             "base_model": self._base_model,
             "tools": self.tools,
             "approval_fn": self.approval_fn,
-            "file_hashes": {},
+            # Seed from the instance store so cross-turn baselines are visible.
+            "file_hashes": dict(self._file_hashes),
         }
+
+        # Track the accumulated file_hashes as update deltas flow in.
+        accumulated_hashes: dict[str, str] = dict(self._file_hashes)
 
         async for chunk in self.graph.astream(state, stream_mode="updates"):
             for node_name, update in chunk.items():
@@ -168,8 +182,16 @@ class Sosa:
                 for u in updates:
                     if not isinstance(u, dict):
                         continue
+                    # Apply any file_hashes delta to our running accumulator.
+                    hash_delta = u.get("file_hashes")
+                    if hash_delta:
+                        accumulated_hashes = merge_file_hashes(accumulated_hashes, hash_delta)
                     new_messages = u.get("messages", [])
                     if not isinstance(new_messages, list):
                         new_messages = [new_messages]
                     for msg in new_messages:
                         yield msg
+
+        # Persist the final accumulated hashes back onto the instance so the
+        # next run() call starts with an up-to-date baseline.
+        self._file_hashes = accumulated_hashes
