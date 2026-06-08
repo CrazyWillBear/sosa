@@ -11,12 +11,28 @@ _MEMORY_OPS = {"read_file", "write_file", "edit_file"}
 _BASH_STALE_WINDOW = 10  # bash outputs within this distance from the end are not truncated
 
 
-def _is_memory_file(file_path: str) -> bool:
-    return Path(file_path).name == "memory.md"
+def _is_memory_dir_file(file_path: str, soul_memory_path: Path | None) -> bool:
+    """Return True when file_path is a file inside soul_memory_path/memory/.
+
+    Replaces the retired _is_memory_file() that keyed on the literal memory.md
+    basename (issue #20).  Under the new per-fact memory model, individual facts
+    live as soul_memory_path/memory/<name>.md, and those are the files that should
+    be pinned so a just-recalled fact is not stripped mid-turn.
+    """
+    if not soul_memory_path:
+        return False
+    try:
+        p = Path(file_path)
+        memory_dir = soul_memory_path / "memory"
+        p.relative_to(memory_dir)  # raises ValueError if not under memory_dir
+        return True
+    except ValueError:
+        return False
 
 
 def cleanup(state: AgentState):
     messages = state.get("messages", [])
+    soul_memory_path: Path | None = state.get("soul_memory_path")
 
     # Build map of tool_call_id -> (tool_name, file_path) from AIMessages
     tool_call_info = {}
@@ -25,13 +41,15 @@ def cleanup(state: AgentState):
             for tc in msg.tool_calls:
                 tool_call_info[tc["id"]] = (tc["name"], tc["args"].get("file_path", ""))
 
-    # For each memory.md file, find the most recent operation (last one wins)
+    # For each memory/ file, find the most recent operation (last one wins).
+    # Pinning keeps a just-recalled per-fact file from being stripped mid-turn,
+    # matching the intent of the retired memory.md pinning (issue #20).
     latest_memory_op = {}
     for msg in messages:
         if isinstance(msg, AIMessage):
             for tc in msg.tool_calls:
                 file_path = tc["args"].get("file_path", "")
-                if file_path and _is_memory_file(file_path) and tc["name"] in _MEMORY_OPS:
+                if file_path and _is_memory_dir_file(file_path, soul_memory_path) and tc["name"] in _MEMORY_OPS:
                     latest_memory_op[file_path] = (tc["id"], tc["name"])
 
     # Track the most recent file operation (read/write/edit) per file path
