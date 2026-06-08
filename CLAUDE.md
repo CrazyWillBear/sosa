@@ -9,6 +9,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python -m cli
 ```
 
+## Running Tests
+
+```bash
+pytest
+```
+
+Tests live in `tests/`. This is the project's done-check — run it before declaring any change complete.
+
 ## Architecture
 
 Sosa is a LangGraph-based ReAct agent. The core class is `sosa/Sosa.py`, which compiles a `StateGraph` and exposes a `run()` generator that yields new messages as the agent works through its turn.

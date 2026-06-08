@@ -9,3 +9,6 @@ rich
 python-dotenv
 
 langchain-ollama
+
+# dev
+pytest
