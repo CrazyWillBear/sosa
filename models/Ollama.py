@@ -1,3 +1,3 @@
 from langchain_ollama import ChatOllama
 
-llama_m = ChatOllama(model="deepseek-r1")
+llama_m = ChatOllama(model="llama3.2")
