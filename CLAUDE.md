@@ -59,7 +59,7 @@ By default, every agent includes: `run_bash_command`, `write_file`, `edit_file`,
 
 ### Bash Command Policy
 
-`sosa/tools/Bash.py` checks every program name in a command against an allowlist (`_ALLOWED`). Commands with non-allowlisted programs are passed to `approval_fn`. The allowlist mirrors `COMMAND_POLICY.md`. Output is capped at ~5000 tokens; cwd defaults to `workspace_path`.
+`sosa/tools/Bash.py` checks every program name in a command against an allowlist (`_ALLOWED`). Commands with non-allowlisted programs are passed to `approval_fn`. Output is capped at ~3000 tokens; cwd defaults to `workspace_path`.
 
 ### Persistent Memory
 
