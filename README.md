@@ -1,7 +1,7 @@
 # Sosa
 
 A LangGraph-based AI agent framework with a focus on safety, modularity, and ease of use. Sosa agents have a 
-configurable workspace, universal + per-workspace memory, external tools (including custom MCP servers), a built-in Bash 
+configurable workspace, universal memory, auto-injected project docs, external tools (including custom MCP servers), a built-in Bash 
 terminal, and a persistent personality.
 
 ## CLI Usage
@@ -36,7 +36,7 @@ Commands that fall outside the built-in allowlist will pause and ask for your ap
 
 To customize the agent's personality or behavior, ask your agent to edit their `soul.md` file accordingly. Changes take effect on the next turn.
 
-The agent also maintains a `memory.md` file in its workspace. It writes to this file to persist information across conversations — it's injected as context every turn, so anything stored there is always available to the agent.
+The agent maintains a universal `memory.md` in `soul_memory_path` (default `~/sosa/`), shared across all workspaces. It is **not** auto-injected — the agent reads and writes it on demand to persist facts across conversations. Workspace-specific context lives in the workspace project doc (`AGENTS.md` / `CLAUDE.md` in `WORKSPACE/`), which **is** auto-injected each turn.
 
 You can also steer agent behavior with **project docs** (`AGENTS.md` / `CLAUDE.md`). Each turn, the agent automatically reads and injects these files from two scopes — no `read_file` call needed:
 
@@ -85,7 +85,7 @@ BASE_PROMPT = "You are a general-purpose assistant. Help the user with whatever 
 SOUL_MEMORY_DIR = Path("/home/you/sosa").resolve()
 ```
 
-**Workspace** — set `WORKSPACE` to the directory where the agent stores its per-workspace memory and any files it creates:
+**Workspace** — set `WORKSPACE` to the directory where the agent creates files and reads its workspace project doc (`AGENTS.md` / `CLAUDE.md`):
 ```python
 WORKSPACE = Path("./workspace").resolve()
 ```
