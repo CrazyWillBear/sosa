@@ -235,3 +235,142 @@ class TestMixedFiles:
         assert sys_msgs, "Expected at least one message"
         # Summarized — not 10 separate messages
         assert len(sys_msgs) == 1, f"Expected 1 summary message, got {len(sys_msgs)}"
+
+
+# ---------------------------------------------------------------------------
+# Summarization: large vs small change sets
+# ---------------------------------------------------------------------------
+
+
+class TestSummarization:
+    """Tests for threshold-based summarization of large change sets."""
+
+    def test_large_changeset_is_summarized(self, tmp_path: Path) -> None:
+        """When affected paths exceed the threshold, message is bounded (not one line per file).
+
+        Verifies:
+        - The total count appears in the message.
+        - Not every individual path is enumerated (bounded size).
+        - The message line count does not grow one-per-file.
+        """
+        from sosa.graph.nodes.staleness import _SUMMARY_THRESHOLD
+
+        n = _SUMMARY_THRESHOLD + 10  # well above threshold
+        files = []
+        hashes = {}
+        for i in range(n):
+            f = tmp_path / f"large_file_{i}.txt"
+            f.write_text(f"original {i}")
+            hashes[str(f)] = hash_file(f)
+            files.append(f)
+
+        # Change all of them
+        for f in files:
+            f.write_text("modified")
+
+        state = _make_state(hashes)
+        result = staleness(state)
+
+        sys_msgs = _system_messages(result)
+        assert sys_msgs, "Expected at least one SystemMessage"
+        assert len(sys_msgs) == 1, "Expected a single summary message"
+
+        content = sys_msgs[0].content
+
+        # The total count must appear in the message
+        assert str(n) in content, (
+            f"Expected total count {n} to appear in summary message. Got:\n{content}"
+        )
+
+        # The message must be bounded — not one line per file.
+        # If all N file paths were listed, each on its own line, we'd have >> N lines.
+        # A bounded summary should have far fewer lines than N.
+        line_count = content.count("\n") + 1
+        assert line_count < n, (
+            f"Message line count ({line_count}) should be less than file count ({n}). "
+            f"Message is not summarized:\n{content}"
+        )
+
+        # Not every individual path should be present (only a sample at most)
+        paths_in_message = sum(1 for f in files if f.name in content or str(f) in content)
+        assert paths_in_message < n, (
+            f"All {n} file paths appear in message — not summarized. "
+            f"Expected only a sample. Got:\n{content}"
+        )
+
+    def test_small_changeset_names_each_path(self, tmp_path: Path) -> None:
+        """When affected paths are at or below the threshold, each path is still named."""
+        from sosa.graph.nodes.staleness import _SUMMARY_THRESHOLD
+
+        n = min(_SUMMARY_THRESHOLD, 3)  # small, definitely at/below threshold
+        files = []
+        hashes = {}
+        for i in range(n):
+            f = tmp_path / f"small_file_{i}.txt"
+            f.write_text(f"original {i}")
+            hashes[str(f)] = hash_file(f)
+            files.append(f)
+
+        for f in files:
+            f.write_text("modified")
+
+        state = _make_state(hashes)
+        result = staleness(state)
+
+        sys_msgs = _system_messages(result)
+        assert sys_msgs, "Expected at least one SystemMessage"
+        content = sys_msgs[0].content
+
+        # Every individual path must be named in the detail listing
+        for f in files:
+            assert f.name in content or str(f) in content, (
+                f"Expected path '{f.name}' to appear in message for small change set. "
+                f"Got:\n{content}"
+            )
+
+    def test_large_changeset_summary_contains_changed_deleted_counts(
+        self, tmp_path: Path
+    ) -> None:
+        """Summary message for large change sets includes changed and deleted counts."""
+        from sosa.graph.nodes.staleness import _SUMMARY_THRESHOLD
+
+        n_changed = _SUMMARY_THRESHOLD // 2 + 1
+        n_deleted = _SUMMARY_THRESHOLD // 2 + 1
+        # total = n_changed + n_deleted > threshold
+
+        changed_files = []
+        deleted_files = []
+        hashes = {}
+
+        for i in range(n_changed):
+            f = tmp_path / f"chg_{i}.txt"
+            f.write_text(f"v1_{i}")
+            hashes[str(f)] = hash_file(f)
+            changed_files.append(f)
+
+        for i in range(n_deleted):
+            f = tmp_path / f"del_{i}.txt"
+            f.write_text(f"data_{i}")
+            hashes[str(f)] = hash_file(f)
+            deleted_files.append(f)
+
+        # Apply changes
+        for f in changed_files:
+            f.write_text("v2")
+        for f in deleted_files:
+            f.unlink()
+
+        state = _make_state(hashes)
+        result = staleness(state)
+
+        sys_msgs = _system_messages(result)
+        assert sys_msgs, "Expected a SystemMessage"
+        content = sys_msgs[0].content
+
+        # Summary should mention how many changed and how many deleted
+        assert str(n_changed) in content, (
+            f"Expected changed count {n_changed} in summary. Got:\n{content}"
+        )
+        assert str(n_deleted) in content, (
+            f"Expected deleted count {n_deleted} in summary. Got:\n{content}"
+        )

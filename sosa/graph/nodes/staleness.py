@@ -10,8 +10,12 @@ Runs before the model is invoked each turn.  Compares every tracked path in
 - **Unchanged**: hash matches → nothing emitted, nothing written.
 
 A single ``SystemMessage`` is injected summarising all affected paths so the
-agent can decide whether to re-read them.  When no files have changed, no
-message is added and the state update is empty (falsy).
+agent can decide whether to re-read them.  When the number of affected paths is
+at or below ``_SUMMARY_THRESHOLD``, each path is listed individually.  When it
+exceeds the threshold, a compact summary is emitted instead (total count,
+changed vs deleted breakdown, and a short capped sample), so the message size
+stays bounded regardless of how many files churned.  When no files have
+changed, no message is added and the state update is empty (falsy).
 """
 
 from pathlib import Path
@@ -20,6 +24,53 @@ from langchain_core.messages import SystemMessage
 
 from sosa.schemas.AgentState import AgentState, REMOVE
 from sosa.tools.hashing import hash_file
+
+# When the total number of affected paths exceeds this threshold, the
+# notification switches from per-path enumeration to a compact summary.
+_SUMMARY_THRESHOLD: int = 10
+
+# Maximum number of sample paths shown in the compact summary.
+_SAMPLE_SIZE: int = 5
+
+
+def _build_message_body(changed: list[str], deleted: list[str]) -> str:
+    """Build the notification body, summarising when the affected count is large."""
+    total = len(changed) + len(deleted)
+    header = (
+        "The following tracked files have changed since you last read them."
+        " Re-read any that are relevant to your current task."
+    )
+
+    if total <= _SUMMARY_THRESHOLD:
+        # Per-path detail (existing behaviour for small change sets)
+        lines: list[str] = [header]
+        if changed:
+            lines.append("\nChanged:")
+            for p in changed:
+                lines.append(f"  - {p} (changed)")
+        if deleted:
+            lines.append("\nDeleted:")
+            for p in deleted:
+                lines.append(f"  - {p} (deleted)")
+        return "\n".join(lines)
+
+    # Compact summary for large change sets
+    parts: list[str] = [header, ""]
+    parts.append(
+        f"Summary: {total} tracked files affected "
+        f"({len(changed)} changed, {len(deleted)} deleted)."
+    )
+
+    # Show a short capped sample drawn from both categories
+    sample: list[str] = (changed + deleted)[:_SAMPLE_SIZE]
+    remaining = total - len(sample)
+    sample_lines = ", ".join(Path(p).name for p in sample)
+    if remaining > 0:
+        parts.append(f"Sample: {sample_lines} … and {remaining} more.")
+    else:
+        parts.append(f"Sample: {sample_lines}.")
+
+    return "\n".join(parts)
 
 
 def staleness(state: AgentState) -> dict:
@@ -50,23 +101,7 @@ def staleness(state: AgentState) -> dict:
     if not changed and not deleted:
         return {}
 
-    # Build a single concise notification message
-    lines: list[str] = [
-        "The following tracked files have changed since you last read them."
-        " Re-read any that are relevant to your current task."
-    ]
-
-    if changed:
-        lines.append("\nChanged:")
-        for p in changed:
-            lines.append(f"  - {p} (changed)")
-
-    if deleted:
-        lines.append("\nDeleted:")
-        for p in deleted:
-            lines.append(f"  - {p} (deleted)")
-
-    notice = SystemMessage(content="\n".join(lines))
+    notice = SystemMessage(content=_build_message_body(changed, deleted))
 
     update: dict = {"messages": [notice]}
     if hash_updates:
